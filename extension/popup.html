@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      width: 280px;
+      background: #0d1117;
+      color: #c9d1d9;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      padding: 16px;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .dots { display: flex; gap: 4px; }
+    .dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      animation: pulse 2s ease-in-out infinite;
+    }
+    .dot-blue { background: #3b82f6; }
+    .dot-red { background: #ef4444; animation-delay: 1s; }
+    @keyframes pulse {
+      0%, 100% { opacity: 0.4; }
+      50% { opacity: 1; }
+    }
+    h1 { font-size: 14px; font-weight: 600; }
+    .btn {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      background: #161b22;
+      color: #c9d1d9;
+      font-size: 13px;
+      cursor: pointer;
+      margin-bottom: 8px;
+      transition: border-color 0.2s;
+    }
+    .btn:hover { border-color: #3b82f6; }
+    .btn-primary {
+      background: #3b82f6;
+      border-color: #3b82f6;
+      color: #fff;
+    }
+    .btn-primary:hover { background: #2563eb; }
+    .status {
+      font-size: 11px;
+      color: #8b949e;
+      text-align: center;
+      margin-top: 8px;
+    }
+    .status.connected { color: #3fb950; }
+    .status.disconnected { color: #f85149; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="dots">
+      <div class="dot dot-blue"></div>
+      <div class="dot dot-red"></div>
+    </div>
+    <h1>Agent Orchestrator</h1>
+  </div>
+  <button class="btn btn-primary" id="toggleBtn">▶ Open Panel</button>
+  <button class="btn" id="settingsBtn">⚙ Settings</button>
+  <div class="status" id="status">Checking API key...</div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

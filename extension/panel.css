@@ -1,0 +1,286 @@
+#agent-orch-panel {
+  position: fixed;
+  top: 80px;
+  right: 24px;
+  width: 420px;
+  max-height: 600px;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5), 0 0 40px rgba(59,130,246,0.08);
+  z-index: 2147483647;
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  color: #c9d1d9;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  resize: both;
+  transition: opacity 0.2s, transform 0.2s;
+}
+
+#agent-orch-panel.hidden {
+  display: none;
+}
+
+/* Drag handle / header */
+#agent-orch-panel .ao-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid #30363d;
+  cursor: grab;
+  user-select: none;
+  background: #161b22;
+  border-radius: 12px 12px 0 0;
+}
+
+#agent-orch-panel .ao-header:active { cursor: grabbing; }
+
+#agent-orch-panel .ao-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+#agent-orch-panel .ao-dots { display: flex; gap: 4px; }
+#agent-orch-panel .ao-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+}
+#agent-orch-panel .ao-dot-blue { background: #3b82f6; }
+#agent-orch-panel .ao-dot-red { background: #ef4444; }
+
+#agent-orch-panel .ao-header-btns {
+  display: flex;
+  gap: 4px;
+}
+
+#agent-orch-panel .ao-header-btn {
+  background: none;
+  border: 1px solid #30363d;
+  color: #8b949e;
+  width: 28px; height: 28px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+#agent-orch-panel .ao-header-btn:hover {
+  border-color: #3b82f6;
+  color: #c9d1d9;
+}
+
+/* Tabs */
+#agent-orch-panel .ao-tabs {
+  display: flex;
+  border-bottom: 1px solid #30363d;
+  background: #161b22;
+}
+#agent-orch-panel .ao-tab {
+  flex: 1;
+  padding: 8px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #8b949e;
+  cursor: pointer;
+  border: none;
+  background: none;
+  border-bottom: 2px solid transparent;
+  transition: all 0.15s;
+}
+#agent-orch-panel .ao-tab:hover { color: #c9d1d9; }
+#agent-orch-panel .ao-tab.active {
+  color: #3b82f6;
+  border-bottom-color: #3b82f6;
+}
+
+/* Content area */
+#agent-orch-panel .ao-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px;
+  font-size: 12px;
+  min-height: 200px;
+  max-height: 440px;
+}
+
+#agent-orch-panel .ao-body::-webkit-scrollbar { width: 4px; }
+#agent-orch-panel .ao-body::-webkit-scrollbar-track { background: transparent; }
+#agent-orch-panel .ao-body::-webkit-scrollbar-thumb {
+  background: #30363d;
+  border-radius: 2px;
+}
+
+/* Task input */
+#agent-orch-panel .ao-input-group {
+  margin-bottom: 10px;
+}
+#agent-orch-panel .ao-label {
+  display: block;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #8b949e;
+  margin-bottom: 4px;
+  font-family: monospace;
+}
+#agent-orch-panel .ao-input {
+  width: 100%;
+  padding: 8px 10px;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  color: #c9d1d9;
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s;
+}
+#agent-orch-panel .ao-input:focus { border-color: #3b82f6; }
+
+#agent-orch-panel .ao-btn {
+  width: 100%;
+  padding: 10px;
+  background: #3b82f6;
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: monospace;
+  transition: background 0.15s;
+}
+#agent-orch-panel .ao-btn:hover { background: #2563eb; }
+#agent-orch-panel .ao-btn:disabled {
+  background: #30363d;
+  color: #8b949e;
+  cursor: not-allowed;
+}
+#agent-orch-panel .ao-btn.running {
+  background: #30363d;
+  color: #3b82f6;
+}
+
+/* Log entries */
+#agent-orch-panel .ao-log-entry {
+  display: flex;
+  gap: 6px;
+  padding: 3px 0;
+  font-family: 'Consolas', 'JetBrains Mono', monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  animation: ao-slide-in 0.2s ease-out;
+}
+@keyframes ao-slide-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+#agent-orch-panel .ao-log-time { color: #484f58; flex-shrink: 0; }
+#agent-orch-panel .ao-log-agent { font-weight: 600; flex-shrink: 0; }
+#agent-orch-panel .ao-log-agent.blue { color: #3b82f6; }
+#agent-orch-panel .ao-log-agent.red { color: #ef4444; }
+#agent-orch-panel .ao-log-agent.orch { color: #c9d1d9; }
+#agent-orch-panel .ao-log-agent.sys { color: #8b949e; }
+
+#agent-orch-panel .ao-log-icon { flex-shrink: 0; }
+#agent-orch-panel .ao-log-icon.info { color: #8b949e; }
+#agent-orch-panel .ao-log-icon.action { color: #3b82f6; }
+#agent-orch-panel .ao-log-icon.error { color: #f85149; }
+#agent-orch-panel .ao-log-icon.success { color: #3fb950; }
+#agent-orch-panel .ao-log-icon.warning { color: #d29922; }
+
+#agent-orch-panel .ao-log-msg { color: #c9d1d9cc; }
+
+/* Status cards */
+#agent-orch-panel .ao-status-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+#agent-orch-panel .ao-status-card {
+  flex: 1;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+#agent-orch-panel .ao-status-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #8b949e;
+  font-family: monospace;
+  margin-bottom: 4px;
+}
+#agent-orch-panel .ao-status-value {
+  font-size: 12px;
+  font-weight: 600;
+  font-family: monospace;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+#agent-orch-panel .ao-status-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+/* Result box */
+#agent-orch-panel .ao-result {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 10px;
+  margin-top: 10px;
+  font-family: monospace;
+  font-size: 11px;
+}
+#agent-orch-panel .ao-result.success { border-color: #3fb95040; }
+#agent-orch-panel .ao-result.error { border-color: #f8514940; }
+
+/* Settings */
+#agent-orch-panel .ao-settings-group {
+  margin-bottom: 16px;
+}
+#agent-orch-panel .ao-settings-title {
+  font-size: 11px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: #c9d1d9;
+}
+#agent-orch-panel .ao-input-password {
+  -webkit-text-security: disc;
+}
+#agent-orch-panel .ao-save-msg {
+  text-align: center;
+  font-size: 11px;
+  color: #3fb950;
+  margin-top: 8px;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+#agent-orch-panel .ao-save-msg.show { opacity: 1; }
+
+/* Empty state */
+#agent-orch-panel .ao-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 150px;
+  color: #8b949e;
+  font-family: monospace;
+  font-size: 12px;
+}
