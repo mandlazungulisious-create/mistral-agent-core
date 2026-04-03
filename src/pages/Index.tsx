@@ -1,116 +1,103 @@
-import { useState, useRef, useEffect } from "react";
-import { TaskInput } from "@/components/TaskInput";
-import { AgentLogItem } from "@/components/AgentLogEntry";
-import { StatusPanel } from "@/components/StatusPanel";
-import { executeTask } from "@/lib/mockAgents";
-import type { AgentLogEntry, OrchestratorResult } from "@/lib/types";
+import { useState } from "react";
+import iconImg from "@/assets/extension-icon.png";
 
 const Index = () => {
-  const [logs, setLogs] = useState<AgentLogEntry[]>([]);
-  const [isRunning, setIsRunning] = useState(false);
-  const [result, setResult] = useState<OrchestratorResult | null>(null);
-  const logEndRef = useRef<HTMLDivElement>(null);
+  const [downloading, setDownloading] = useState(false);
 
-  useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [logs]);
-
-  const handleExecute = async (task: string, url: string) => {
-    setLogs([]);
-    setResult(null);
-    setIsRunning(true);
-
-    try {
-      const res = await executeTask(task, url, (log) => {
-        setLogs((prev) => [...prev, log]);
-      });
-      setResult(res);
-    } catch (err) {
-      setLogs((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          timestamp: Date.now(),
-          agent: "orchestrator",
-          message: `Error: ${err instanceof Error ? err.message : "Unknown error"}`,
-          type: "error",
-        },
-      ]);
-    } finally {
-      setIsRunning(false);
-    }
+  const handleDownload = () => {
+    setDownloading(true);
+    fetch("/agent-orchestrator.zip")
+      .then((res) => {
+        if (!res.ok) throw new Error(`Download failed: ${res.status}`);
+        return res.blob();
+      })
+      .then((blob) => {
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "agent-orchestrator.zip";
+        a.click();
+        URL.revokeObjectURL(a.href);
+      })
+      .catch((err) => alert(err.message))
+      .finally(() => setDownloading(false));
   };
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
-      {/* Header */}
-      <header className="border-b border-border px-6 py-4">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="flex gap-1">
-              <span className="w-3 h-3 rounded-full bg-blue-agent animate-pulse-glow" />
-              <span className="w-3 h-3 rounded-full bg-red-agent animate-pulse-glow" style={{ animationDelay: "1s" }} />
-            </div>
-            <h1 className="text-lg font-mono font-bold text-foreground">
-              Agent Orchestrator
-            </h1>
-          </div>
-          <span className="text-xs font-mono text-muted-foreground">
-            BLUE + RED • Mistral Agents
-          </span>
-        </div>
-      </header>
-
-      {/* Main */}
-      <main className="flex-1 max-w-7xl mx-auto w-full p-6 grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-6">
-        {/* Left Panel */}
-        <div className="space-y-6">
-          <div className="bg-card border border-border rounded-lg p-4">
-            <h2 className="text-xs font-mono text-muted-foreground uppercase tracking-wider mb-4">
-              Mission Control
-            </h2>
-            <TaskInput onSubmit={handleExecute} isRunning={isRunning} />
-          </div>
-
-          <StatusPanel isRunning={isRunning} result={result} />
-
-          {result?.output && (
-            <div className={`bg-card border rounded-lg p-4 ${result.success ? "border-success/30" : "border-destructive/30"}`}>
-              <h2 className="text-xs font-mono text-muted-foreground uppercase tracking-wider mb-2">
-                Result
-              </h2>
-              <p className="font-mono text-sm text-foreground/80">{result.output}</p>
-            </div>
-          )}
+    <div className="min-h-screen bg-background flex flex-col items-center justify-center p-6">
+      <div className="max-w-lg w-full text-center space-y-8">
+        {/* Icon */}
+        <div className="flex justify-center">
+          <img src={iconImg} alt="Agent Orchestrator" width={96} height={96} className="rounded-2xl" />
         </div>
 
-        {/* Right Panel — Agent Log */}
-        <div className="bg-card border border-border rounded-lg flex flex-col min-h-[500px]">
-          <div className="border-b border-border px-4 py-3 flex items-center justify-between">
-            <h2 className="text-xs font-mono text-muted-foreground uppercase tracking-wider">
-              Agent Output
-            </h2>
-            <div className="flex items-center gap-3 text-xs font-mono">
-              <span className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-blue-agent" /> Blue
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-red-agent" /> Red
-              </span>
-            </div>
-          </div>
-          <div className="flex-1 overflow-y-auto p-4 space-y-1">
-            {logs.length === 0 ? (
-              <div className="flex items-center justify-center h-full text-muted-foreground font-mono text-sm">
-                Awaiting task execution...
-              </div>
-            ) : (
-              logs.map((entry) => <AgentLogItem key={entry.id} entry={entry} />)
-            )}
-            <div ref={logEndRef} />
-          </div>
+        {/* Title */}
+        <div>
+          <h1 className="text-3xl font-mono font-bold text-foreground mb-2">
+            Agent Orchestrator
+          </h1>
+          <p className="text-muted-foreground text-sm">
+            Blue + Red Mistral AI Agents — Chrome Extension
+          </p>
         </div>
-      </main>
+
+        {/* Features */}
+        <div className="grid grid-cols-2 gap-3 text-left">
+          {[
+            { icon: "🔵", label: "Blue Agent", desc: "Page analysis & planning" },
+            { icon: "🔴", label: "Red Agent", desc: "Action execution & validation" },
+            { icon: "🧠", label: "Smart Memory", desc: "Cross-iteration context" },
+            { icon: "🔒", label: "Secure Keys", desc: "Stored locally in Chrome" },
+          ].map((f) => (
+            <div key={f.label} className="bg-card border border-border rounded-lg p-3">
+              <div className="text-lg mb-1">{f.icon}</div>
+              <div className="text-xs font-mono font-semibold text-foreground">{f.label}</div>
+              <div className="text-xs text-muted-foreground">{f.desc}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Download */}
+        <button
+          onClick={handleDownload}
+          disabled={downloading}
+          className="w-full py-3 bg-primary text-primary-foreground font-mono font-semibold rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50"
+        >
+          {downloading ? "Downloading..." : "⬇ Download Extension"}
+        </button>
+
+        {/* Install steps */}
+        <div className="bg-card border border-border rounded-lg p-4 text-left">
+          <h2 className="text-xs font-mono text-muted-foreground uppercase tracking-wider mb-3">
+            Installation
+          </h2>
+          <ol className="space-y-2 text-sm text-foreground/80">
+            <li className="flex gap-2">
+              <span className="text-primary font-mono font-bold">1.</span>
+              Unzip the downloaded file
+            </li>
+            <li className="flex gap-2">
+              <span className="text-primary font-mono font-bold">2.</span>
+              Open <code className="bg-secondary px-1.5 py-0.5 rounded text-xs font-mono">chrome://extensions</code>
+            </li>
+            <li className="flex gap-2">
+              <span className="text-primary font-mono font-bold">3.</span>
+              Enable <strong>Developer mode</strong> (top-right toggle)
+            </li>
+            <li className="flex gap-2">
+              <span className="text-primary font-mono font-bold">4.</span>
+              Click <strong>Load unpacked</strong> → select the folder
+            </li>
+            <li className="flex gap-2">
+              <span className="text-primary font-mono font-bold">5.</span>
+              Click the extension icon → open Settings → add your Mistral API key
+            </li>
+          </ol>
+        </div>
+
+        <p className="text-xs text-muted-foreground">
+          Works in Chrome, Edge, Brave, Arc, and Opera
+        </p>
+      </div>
     </div>
   );
 };
