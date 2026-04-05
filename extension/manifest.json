@@ -1,9 +1,14 @@
 {
   "manifest_version": 3,
   "name": "Agent Orchestrator",
-  "version": "1.0.0",
-  "description": "Blue + Red Mistral AI Agent system for web automation",
+  "version": "1.1.0",
+  "description": "Blue + Red Mistral AI Agent system for web automation with smart survey detection",
   "permissions": ["activeTab", "storage", "tabs", "scripting"],
+  "host_permissions": [
+    "http://localhost:11434/*",
+    "http://localhost:5000/*",
+    "https://api.mistral.ai/*"
+  ],
   "action": {
     "default_popup": "popup.html",
     "default_icon": {

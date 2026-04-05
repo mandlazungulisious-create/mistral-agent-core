@@ -170,6 +170,18 @@
   background: #30363d;
   color: #3b82f6;
 }
+#agent-orch-panel .ao-btn-pause {
+  background: #d29922;
+  color: #fff;
+  font-size: 11px;
+}
+#agent-orch-panel .ao-btn-pause:hover { background: #b8860b; }
+#agent-orch-panel .ao-btn-stop {
+  background: #f85149;
+  color: #fff;
+  font-size: 11px;
+}
+#agent-orch-panel .ao-btn-stop:hover { background: #da3633; }
 
 /* Log entries */
 #agent-orch-panel .ao-log-entry {

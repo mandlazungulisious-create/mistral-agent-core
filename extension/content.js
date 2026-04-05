@@ -1,7 +1,6 @@
 // ──────────────────────────────────────────────
 // Agent Orchestrator — Content Script
-// Injects a free-floating panel into any page
-// with VISUAL ACTION FEEDBACK (cursor, clicks, typing)
+// Smart Click Engine + Survey Grid + Local/Cloud AI + Pause/Resume
 // ──────────────────────────────────────────────
 
 (function () {
@@ -34,9 +33,7 @@
       transition: left 0.4s cubic-bezier(.4,0,.2,1), top 0.4s cubic-bezier(.4,0,.2,1);
       filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));
     }
-    #ao-virtual-cursor svg {
-      width: 20px; height: 20px;
-    }
+    #ao-virtual-cursor svg { width: 20px; height: 20px; }
     #ao-action-label {
       position: fixed;
       pointer-events: none;
@@ -176,18 +173,226 @@
     return dom
       .replace(/<script[\s\S]*?<\/script>/gi, "")
       .replace(/<style[\s\S]*?<\/style>/gi, "")
+      .replace(/<!--[\s\S]*?-->/gi, "")
+      .replace(/<(noscript|iframe|svg|path|meta|link)[\s\S]*?(<\/\1>|\/>)/gi, "")
       .replace(/\s+/g, " ")
       .slice(0, 3000);
   }
 
-  // ── Get real page snapshot ──
+  // ══════════════════════════════════════════════
+  // ── INTERACTION GRID (Survey/Tricky UI Fix) ──
+  // ══════════════════════════════════════════════
+
+  function isClickable(el) {
+    const clickableTags = ["BUTTON", "A", "INPUT", "SELECT", "TEXTAREA", "LABEL"];
+    const style = window.getComputedStyle(el);
+    return (
+      clickableTags.includes(el.tagName) ||
+      el.onclick !== null ||
+      el.getAttribute("role") === "button" ||
+      el.getAttribute("role") === "option" ||
+      el.getAttribute("role") === "radio" ||
+      el.getAttribute("role") === "checkbox" ||
+      el.getAttribute("role") === "tab" ||
+      el.getAttribute("role") === "menuitem" ||
+      el.getAttribute("tabindex") !== null ||
+      style.cursor === "pointer"
+    );
+  }
+
+  function buildInteractionGrid() {
+    const elements = Array.from(document.querySelectorAll("*"));
+    return elements
+      .map(el => {
+        const rect = el.getBoundingClientRect();
+        if (rect.width < 10 || rect.height < 10) return null;
+        if (rect.top > window.innerHeight + 200 || rect.bottom < -200) return null;
+
+        const text = (el.innerText || el.textContent || "").trim().slice(0, 80);
+        if (!text && !isClickable(el)) return null;
+
+        return {
+          tag: el.tagName,
+          text,
+          aria: el.getAttribute("aria-label") || el.getAttribute("aria-describedby") || "",
+          role: el.getAttribute("role") || "",
+          type: el.type || "",
+          name: el.name || "",
+          id: el.id || "",
+          className: (el.className || "").toString().slice(0, 60),
+          x: Math.round(rect.left),
+          y: Math.round(rect.top),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+          clickable: isClickable(el),
+          visible: rect.width > 0 && rect.height > 0,
+        };
+      })
+      .filter(Boolean)
+      .slice(0, 100);
+  }
+
+  function detectSurveyOptions() {
+    const candidates = Array.from(document.querySelectorAll(
+      'label, [role="option"], [role="radio"], [role="checkbox"], ' +
+      '[role="button"], [role="tab"], div[class*="option"], div[class*="choice"], ' +
+      'div[class*="answer"], span[class*="option"], li[class*="option"]'
+    ));
+    return candidates
+      .filter(el => {
+        const text = (el.innerText || "").trim();
+        return text.length > 0 && text.length < 200;
+      })
+      .map(el => ({
+        text: el.innerText.trim(),
+        rect: el.getBoundingClientRect(),
+        tag: el.tagName,
+        role: el.getAttribute("role") || "",
+      }));
+  }
+
+  // ══════════════════════════════════════════════
+  // ── SMART CLICK ENGINE (Fallback System) ──
+  // ══════════════════════════════════════════════
+
+  function findElementByText(text) {
+    const lower = text.toLowerCase().trim();
+    const all = Array.from(document.querySelectorAll("*"));
+
+    // Exact match first
+    let found = all.find(el => {
+      const t = (el.innerText || el.textContent || "").trim().toLowerCase();
+      return t === lower && el.offsetParent !== null;
+    });
+    if (found) return found;
+
+    // Contains match (prefer smaller/more specific elements)
+    const matches = all
+      .filter(el => {
+        const t = (el.innerText || el.textContent || "").trim().toLowerCase();
+        return t.includes(lower) && el.offsetParent !== null;
+      })
+      .sort((a, b) => {
+        const aLen = (a.innerText || "").length;
+        const bLen = (b.innerText || "").length;
+        return aLen - bLen; // prefer shorter = more specific
+      });
+
+    return matches[0] || null;
+  }
+
+  function findElementByAriaLabel(label) {
+    return document.querySelector(`[aria-label="${label}"]`) ||
+      document.querySelector(`[aria-label*="${label}" i]`) ||
+      document.querySelector(`[title="${label}"]`) ||
+      document.querySelector(`[title*="${label}" i]`);
+  }
+
+  function findNextButton() {
+    const candidates = Array.from(document.querySelectorAll("button, a, div, span, input[type='submit']"));
+    const nextWords = ["next", "continue", "submit", "proceed", "forward", "siguiente", "suivant", "weiter"];
+
+    return candidates.find(el => {
+      const text = (el.innerText || el.value || "").trim().toLowerCase();
+      const aria = (el.getAttribute("aria-label") || "").toLowerCase();
+      return nextWords.some(w => text.includes(w) || aria.includes(w)) ||
+        text === ">" || text === "→" || text === ">>";
+    });
+  }
+
+  function clickByPosition(x, y) {
+    const el = document.elementFromPoint(x, y);
+    if (el) {
+      highlightElement(el);
+      el.click();
+      el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      return true;
+    }
+    return false;
+  }
+
+  function smartClick(action) {
+    let el = null;
+    let method = "";
+
+    // 1. Try normal CSS selector (with safety)
+    if (action.selector && !action.selector.includes(":text(") && !action.selector.includes(":has(")) {
+      try {
+        el = document.querySelector(action.selector);
+        method = "selector";
+      } catch (e) { /* invalid selector */ }
+    }
+
+    // 2. Try extracting text from Playwright-style selectors
+    if (!el && action.selector) {
+      const textMatch = action.selector.match(/text\(['"](.+?)['"]\)/i) ||
+        action.selector.match(/:text\(['"](.+?)['"]\)/i) ||
+        action.selector.match(/["']([^"']+)["']/);
+      if (textMatch) {
+        el = findElementByText(textMatch[1]);
+        method = "text-extract";
+      }
+    }
+
+    // 3. Try action.value as text
+    if (!el && action.value) {
+      el = findElementByText(action.value);
+      method = "value-text";
+    }
+
+    // 4. Try aria-label
+    if (!el && action.selector) {
+      const ariaMatch = action.selector.match(/aria-label=['"](.+?)['"]/);
+      if (ariaMatch) {
+        el = findElementByAriaLabel(ariaMatch[1]);
+        method = "aria";
+      }
+    }
+
+    // 5. Try position-based click
+    if (!el && action.selector && action.selector.startsWith("POSITION:")) {
+      const coords = action.selector.replace("POSITION:", "").split(",");
+      if (coords.length === 2) {
+        const clicked = clickByPosition(Number(coords[0]), Number(coords[1]));
+        if (clicked) return { success: true, method: "position" };
+      }
+    }
+
+    // 6. If it looks like a "next" action
+    if (!el && (action.type === "next" || (action.value || "").toLowerCase().includes("next"))) {
+      el = findNextButton();
+      method = "next-detect";
+    }
+
+    if (el) {
+      const removeHL = highlightElement(el);
+      const pos = moveCursorToElement(el, `${method} → click`);
+      showClickRipple(pos.x, pos.y);
+      el.click();
+      el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      setTimeout(() => removeHL(), 1200);
+      return { success: true, method };
+    }
+
+    return { success: false, method: "none" };
+  }
+
+  // ══════════════════════════════════════════════
+  // ── ACTION VALIDATION & EXECUTION ──
+  // ══════════════════════════════════════════════
+
+  function isValidAction(action) {
+    return action && typeof action === "object" && typeof action.type === "string" && action.type.length > 0;
+  }
+
+  // ── Get real page snapshot (with grid) ──
   function getPageSnapshot() {
     const forms = Array.from(document.forms).map(
       (f) => f.id || f.name || "unnamed"
     );
     const interactive = Array.from(
       document.querySelectorAll(
-        'a, button, input, select, textarea, [role="button"], [onclick]'
+        'a, button, input, select, textarea, [role="button"], [role="option"], [role="radio"], [role="checkbox"], [onclick], [tabindex]'
       )
     ).map((el) => {
       const tag = el.tagName.toLowerCase();
@@ -195,8 +400,10 @@
       const cls = el.className
         ? `.${String(el.className).split(" ").slice(0, 2).join(".")}`
         : "";
-      const text = el.textContent?.trim().slice(0, 30) || "";
-      return `${tag}${id}${cls}${text ? ` "${text}"` : ""}`;
+      const text = (el.textContent || "").trim().slice(0, 30);
+      const role = el.getAttribute("role") || "";
+      const aria = el.getAttribute("aria-label") || "";
+      return `${tag}${id}${cls}${text ? ` "${text}"` : ""}${role ? ` [role=${role}]` : ""}${aria ? ` [aria=${aria}]` : ""}`;
     });
 
     return {
@@ -204,12 +411,17 @@
       title: document.title,
       domTree: document.documentElement.outerHTML,
       forms,
-      interactiveElements: interactive.slice(0, 50),
+      interactiveElements: interactive.slice(0, 60),
       visibleText: document.body?.innerText?.slice(0, 2000) || "",
+      grid: buildInteractionGrid(),
+      surveyOptions: detectSurveyOptions(),
     };
   }
 
-  // ── Mistral Agent API call ──
+  // ══════════════════════════════════════════════
+  // ── AI ROUTER (Cloud Mistral / Local Ollama) ──
+  // ══════════════════════════════════════════════
+
   async function callMistralAgent(agentId, apiKey, messages) {
     const res = await fetch("https://api.mistral.ai/v1/agents/completions", {
       method: "POST",
@@ -235,17 +447,64 @@
     }
   }
 
+  async function callLocalOllama(model, messages) {
+    const res = await fetch("http://localhost:11434/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model, messages, stream: false }),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`Ollama ${res.status}: ${errText}`);
+    }
+
+    const data = await res.json();
+    const text = data.message?.content || "{}";
+
+    try {
+      return JSON.parse(text);
+    } catch {
+      return { raw: text, status: "need_red", reasoning: text, confidence: 50, actions: [] };
+    }
+  }
+
+  async function callAI(settings, agentId, messages) {
+    const mode = settings.aiMode || "cloud";
+
+    if (mode === "local") {
+      const model = settings.ollamaModel || "mistral";
+      return await callLocalOllama(model, messages);
+    }
+
+    if (mode === "hybrid") {
+      // Try cloud first, fallback to local
+      try {
+        return await callMistralAgent(agentId, settings.mistralApiKey, messages);
+      } catch (cloudErr) {
+        addLog("system", `Cloud failed (${cloudErr.message}), falling back to local...`, "warning");
+        const model = settings.ollamaModel || "mistral";
+        return await callLocalOllama(model, messages);
+      }
+    }
+
+    // Default: cloud
+    return await callMistralAgent(agentId, settings.mistralApiKey, messages);
+  }
+
   // ── Blue Agent ──
-  async function runBlueAgent(task, snapshot, memory, apiKey, agentId) {
+  async function runBlueAgent(task, snapshot, memory, settings, agentId) {
     const dom = cleanDOM(snapshot.domTree);
     const payload = {
       task, url: snapshot.url, title: snapshot.title, dom,
       forms: snapshot.forms,
       interactiveElements: snapshot.interactiveElements.length,
+      grid: snapshot.grid?.slice(0, 30),
+      surveyOptions: snapshot.surveyOptions,
       memory,
     };
 
-    const output = await callMistralAgent(agentId, apiKey, [
+    const output = await callAI(settings, agentId, [
       { role: "user", content: JSON.stringify(payload) },
     ]);
 
@@ -254,41 +513,71 @@
   }
 
   // ── Red Agent ──
-  async function runRedAgent(task, snapshot, memory, blueContext, apiKey, agentId) {
+  async function runRedAgent(task, snapshot, memory, blueContext, settings, agentId) {
     const dom = cleanDOM(snapshot.domTree);
     const payload = {
       task, url: snapshot.url, dom,
       forms: snapshot.forms,
       interactiveElements: snapshot.interactiveElements,
+      grid: snapshot.grid,
+      surveyOptions: snapshot.surveyOptions,
       memory,
       blueReasoning: blueContext?.reasoning || null,
     };
 
-    const output = await callMistralAgent(agentId, apiKey, [
+    const output = await callAI(settings, agentId, [
       { role: "user", content: JSON.stringify(payload) },
     ]);
 
-    const validTypes = ["click", "fill", "select", "hover", "type", "submit", "upload", "wait", "scroll"];
-    output.actions = (output.actions || []).filter((a) => validTypes.includes(a.type));
+    const validTypes = ["click", "fill", "select", "hover", "type", "submit", "upload", "wait", "scroll", "next"];
+    output.actions = (output.actions || []).filter((a) => isValidAction(a) && validTypes.includes(a.type));
     return output;
   }
 
-  // ── Execute browser actions WITH visual feedback ──
+  // ── Execute browser actions WITH visual feedback + smart fallback ──
   async function executeBrowserAction(action) {
-    const el = action.selector ? document.querySelector(action.selector) : null;
+    if (!isValidAction(action)) {
+      return;
+    }
+
+    // Handle "next" action type
+    if (action.type === "next") {
+      const btn = findNextButton();
+      if (btn) {
+        const removeHL = highlightElement(btn);
+        const pos = moveCursorToElement(btn, "click → Next");
+        await new Promise(r => setTimeout(r, 500));
+        showClickRipple(pos.x, pos.y);
+        btn.click();
+        setTimeout(() => removeHL(), 1200);
+      } else {
+        throw new Error("Next button not found");
+      }
+      return;
+    }
+
+    // For clicks, use the smart click engine
+    if (action.type === "click") {
+      const result = smartClick(action);
+      if (!result.success) {
+        throw new Error(`Smart click failed for: ${action.selector || action.value || "unknown"}`);
+      }
+      await new Promise(r => setTimeout(r, 400));
+      return;
+    }
+
+    // For other action types, try selector first, then text fallback
+    let el = null;
+    if (action.selector) {
+      try { el = document.querySelector(action.selector); } catch (e) { /* */ }
+    }
+    if (!el && action.value) {
+      el = findElementByText(action.value);
+    }
+
     let removeHighlight = null;
 
     switch (action.type) {
-      case "click": {
-        if (!el) throw new Error(`Element not found: ${action.selector}`);
-        removeHighlight = highlightElement(el);
-        const pos = moveCursorToElement(el, `click → ${action.selector}`);
-        await new Promise(r => setTimeout(r, 500));
-        showClickRipple(pos.x, pos.y);
-        await new Promise(r => setTimeout(r, 200));
-        el.click();
-        break;
-      }
       case "fill":
       case "type": {
         if (!el) throw new Error(`Element not found: ${action.selector}`);
@@ -327,22 +616,43 @@
       }
       case "scroll":
         showScrollArrow(parseInt(action.value) || 300);
-        moveCursorTo(window.innerWidth / 2, window.innerHeight / 2, `scroll ${parseInt(action.value) > 0 ? "↓" : "↑"} ${Math.abs(parseInt(action.value) || 300)}px`);
+        moveCursorTo(window.innerWidth / 2, window.innerHeight / 2,
+          `scroll ${parseInt(action.value) > 0 ? "↓" : "↑"} ${Math.abs(parseInt(action.value) || 300)}px`);
         await new Promise(r => setTimeout(r, 300));
         window.scrollBy({ top: parseInt(action.value) || 300, behavior: "smooth" });
         await new Promise(r => setTimeout(r, 600));
         break;
       case "wait":
-        moveCursorTo(window.innerWidth / 2, window.innerHeight / 2, `waiting ${action.value || 1000}ms...`);
+        moveCursorTo(window.innerWidth / 2, window.innerHeight / 2,
+          `waiting ${action.value || 1000}ms...`);
         await new Promise(r => setTimeout(r, parseInt(action.value) || 1000));
         break;
       default:
         break;
     }
 
-    // Clean up highlight after a delay
     if (removeHighlight) setTimeout(removeHighlight, 1200);
-    return Promise.resolve();
+  }
+
+  // ── Action retry system ──
+  async function executeWithRetry(action, maxAttempts) {
+    maxAttempts = maxAttempts || 3;
+    let attempts = 0;
+    let lastErr;
+
+    while (attempts < maxAttempts) {
+      try {
+        await executeBrowserAction(action);
+        return { success: true, attempts: attempts + 1 };
+      } catch (err) {
+        attempts++;
+        lastErr = err;
+        if (attempts < maxAttempts) {
+          await new Promise(r => setTimeout(r, 500));
+        }
+      }
+    }
+    return { success: false, attempts, error: lastErr?.message || "Unknown" };
   }
 
   // ── Logging ──
@@ -351,14 +661,17 @@
 
   let logs = [];
   let isRunning = false;
+  let isPaused = false;
   let result = null;
   let currentView = "main";
 
-  function createLog(agent, message, type = "info") {
+  function createLog(agent, message, type) {
+    type = type || "info";
     return { id: Date.now() + Math.random(), timestamp: Date.now(), agent, message, type };
   }
 
-  function addLog(agent, message, type = "info") {
+  function addLog(agent, message, type) {
+    type = type || "info";
     const entry = createLog(agent, message, type);
     logs.push(entry);
     renderLogEntry(entry);
@@ -406,14 +719,18 @@
           </div>
           <div class="ao-status-card">
             <div class="ao-status-label">Mode</div>
-            <div class="ao-status-value" id="ao-mode-val">Live</div>
+            <div class="ao-status-value" id="ao-mode-val">—</div>
           </div>
         </div>
         <div class="ao-input-group">
           <label class="ao-label">Task</label>
           <input class="ao-input" id="ao-task-input" placeholder="Describe the task..." value="">
         </div>
-        <button class="ao-btn" id="ao-run-btn">▶ Execute Task</button>
+        <div style="display:flex;gap:6px;">
+          <button class="ao-btn" id="ao-run-btn" style="flex:1;">▶ Execute Task</button>
+          <button class="ao-btn ao-btn-pause" id="ao-pause-btn" style="flex:0 0 auto;width:70px;display:none;">⏸ Pause</button>
+          <button class="ao-btn ao-btn-stop" id="ao-stop-btn" style="flex:0 0 auto;width:60px;display:none;">■ Stop</button>
+        </div>
         <div id="ao-log-area" style="margin-top:12px;"></div>
         <div id="ao-result-area"></div>
       </div>
@@ -423,6 +740,8 @@
     document.getElementById("ao-minimize-btn").onclick = () => panel.classList.add("hidden");
     document.getElementById("ao-settings-btn").onclick = () => { currentView = "settings"; render(); };
     document.getElementById("ao-run-btn").onclick = handleRun;
+    document.getElementById("ao-pause-btn").onclick = handlePause;
+    document.getElementById("ao-stop-btn").onclick = handleStop;
 
     setupDrag();
 
@@ -435,12 +754,14 @@
     }
 
     updateStatus();
+    updateModeDisplay();
   }
 
   function renderSettings() {
     chrome.storage.local.get(
-      ["mistralApiKey", "blueAgentId", "redAgentId"],
+      ["mistralApiKey", "blueAgentId", "redAgentId", "aiMode", "ollamaModel", "ollamaUrl"],
       (data) => {
+        const mode = data.aiMode || "cloud";
         panel.innerHTML = `
           <div class="ao-header" id="ao-drag-handle">
             <div class="ao-title">
@@ -457,22 +778,46 @@
           </div>
           <div class="ao-body">
             <div class="ao-settings-group">
-              <div class="ao-settings-title">🔑 Mistral API Key</div>
-              <input class="ao-input ao-input-password" id="ao-api-key" type="password"
-                placeholder="Enter your Mistral API key..."
-                value="${data.mistralApiKey || ""}">
+              <div class="ao-settings-title">🧠 AI Mode</div>
+              <select class="ao-input" id="ao-ai-mode">
+                <option value="cloud" ${mode === "cloud" ? "selected" : ""}>☁️ Cloud (Mistral API)</option>
+                <option value="local" ${mode === "local" ? "selected" : ""}>💻 Local (Ollama)</option>
+                <option value="hybrid" ${mode === "hybrid" ? "selected" : ""}>🔀 Hybrid (Cloud → Local fallback)</option>
+              </select>
             </div>
-            <div class="ao-settings-group">
-              <div class="ao-settings-title">🔵 Blue Agent ID</div>
-              <input class="ao-input" id="ao-blue-id"
-                placeholder="ag_..."
-                value="${data.blueAgentId || "ag_019d3f32fc3576c6a94b8b8e033c700f"}">
+            <div id="ao-cloud-settings" style="${mode === "local" ? "display:none" : ""}">
+              <div class="ao-settings-group">
+                <div class="ao-settings-title">🔑 Mistral API Key</div>
+                <input class="ao-input ao-input-password" id="ao-api-key" type="password"
+                  placeholder="Enter your Mistral API key..."
+                  value="${data.mistralApiKey || ""}">
+              </div>
+              <div class="ao-settings-group">
+                <div class="ao-settings-title">🔵 Blue Agent ID</div>
+                <input class="ao-input" id="ao-blue-id"
+                  placeholder="ag_..."
+                  value="${data.blueAgentId || "ag_019d3f32fc3576c6a94b8b8e033c700f"}">
+              </div>
+              <div class="ao-settings-group">
+                <div class="ao-settings-title">🔴 Red Agent ID</div>
+                <input class="ao-input" id="ao-red-id"
+                  placeholder="ag_..."
+                  value="${data.redAgentId || "ag_019d3f38dfd2721cb947ec4597d6eaa8"}">
+              </div>
             </div>
-            <div class="ao-settings-group">
-              <div class="ao-settings-title">🔴 Red Agent ID</div>
-              <input class="ao-input" id="ao-red-id"
-                placeholder="ag_..."
-                value="${data.redAgentId || "ag_019d3f38dfd2721cb947ec4597d6eaa8"}">
+            <div id="ao-local-settings" style="${mode === "cloud" ? "display:none" : ""}">
+              <div class="ao-settings-group">
+                <div class="ao-settings-title">🦙 Ollama Model</div>
+                <input class="ao-input" id="ao-ollama-model"
+                  placeholder="mistral, llama3, phi3..."
+                  value="${data.ollamaModel || "mistral"}">
+              </div>
+              <div class="ao-settings-group">
+                <div class="ao-settings-title">🌐 Ollama URL</div>
+                <input class="ao-input" id="ao-ollama-url"
+                  placeholder="http://localhost:11434"
+                  value="${data.ollamaUrl || "http://localhost:11434"}">
+              </div>
             </div>
             <button class="ao-btn" id="ao-save-btn">💾 Save Settings</button>
             <div class="ao-save-msg" id="ao-save-msg">Settings saved!</div>
@@ -485,13 +830,23 @@
           </div>
         `;
 
+        // Mode toggle visibility
+        document.getElementById("ao-ai-mode").onchange = (e) => {
+          const val = e.target.value;
+          document.getElementById("ao-cloud-settings").style.display = val === "local" ? "none" : "";
+          document.getElementById("ao-local-settings").style.display = val === "cloud" ? "none" : "";
+        };
+
         document.getElementById("ao-back-btn").onclick = () => { currentView = "main"; render(); };
         document.getElementById("ao-close-btn2").onclick = () => panel.classList.add("hidden");
         document.getElementById("ao-save-btn").onclick = () => {
           chrome.storage.local.set({
-            mistralApiKey: document.getElementById("ao-api-key").value.trim(),
-            blueAgentId: document.getElementById("ao-blue-id").value.trim(),
-            redAgentId: document.getElementById("ao-red-id").value.trim(),
+            mistralApiKey: document.getElementById("ao-api-key")?.value?.trim() || "",
+            blueAgentId: document.getElementById("ao-blue-id")?.value?.trim() || "",
+            redAgentId: document.getElementById("ao-red-id")?.value?.trim() || "",
+            aiMode: document.getElementById("ao-ai-mode").value,
+            ollamaModel: document.getElementById("ao-ollama-model")?.value?.trim() || "mistral",
+            ollamaUrl: document.getElementById("ao-ollama-url")?.value?.trim() || "http://localhost:11434",
           }, () => {
             const msg = document.getElementById("ao-save-msg");
             msg.classList.add("show");
@@ -531,12 +886,23 @@
     if (body) body.scrollTop = body.scrollHeight;
   }
 
+  function updateModeDisplay() {
+    const modeVal = document.getElementById("ao-mode-val");
+    if (!modeVal) return;
+    chrome.storage.local.get(["aiMode"], (data) => {
+      const labels = { cloud: "☁ Cloud", local: "💻 Local", hybrid: "🔀 Hybrid" };
+      modeVal.textContent = labels[data.aiMode] || "☁ Cloud";
+    });
+  }
+
   function updateStatus() {
     const statusVal = document.getElementById("ao-status-val");
     const iterVal = document.getElementById("ao-iter-val");
     if (!statusVal) return;
 
-    if (isRunning) {
+    if (isPaused) {
+      statusVal.innerHTML = '<span class="ao-status-dot" style="background:#d29922"></span> Paused';
+    } else if (isRunning) {
       statusVal.innerHTML = '<span class="ao-status-dot" style="background:#3b82f6"></span> Running';
     } else if (result) {
       const color = result.success ? "#3fb950" : "#f85149";
@@ -590,6 +956,28 @@
     document.addEventListener("mouseup", () => { isDragging = false; });
   }
 
+  // ── Pause / Resume / Stop ──
+  function handlePause() {
+    const btn = document.getElementById("ao-pause-btn");
+    if (isPaused) {
+      isPaused = false;
+      if (btn) btn.textContent = "⏸ Pause";
+      addLog("system", "▶ Resumed", "info");
+    } else {
+      isPaused = true;
+      if (btn) btn.textContent = "▶ Resume";
+      addLog("system", "⏸ Paused", "warning");
+    }
+    updateStatus();
+  }
+
+  function handleStop() {
+    isRunning = false;
+    isPaused = false;
+    addLog("system", "■ Stopped by user", "warning");
+    updateStatus();
+  }
+
   // ── Execute Task ──
   async function handleRun() {
     const taskInput = document.getElementById("ao-task-input");
@@ -597,45 +985,66 @@
     if (!task || isRunning) return;
 
     chrome.storage.local.get(
-      ["mistralApiKey", "blueAgentId", "redAgentId"],
+      ["mistralApiKey", "blueAgentId", "redAgentId", "aiMode", "ollamaModel", "ollamaUrl"],
       async (data) => {
-        if (!data.mistralApiKey) {
+        const mode = data.aiMode || "cloud";
+
+        if (mode !== "local" && !data.mistralApiKey) {
           addLog("system", "⚠ No API key configured — open Settings", "error");
           return;
         }
 
-        const apiKey = data.mistralApiKey;
+        const settings = {
+          mistralApiKey: data.mistralApiKey,
+          aiMode: mode,
+          ollamaModel: data.ollamaModel || "mistral",
+          ollamaUrl: data.ollamaUrl || "http://localhost:11434",
+        };
+
         const blueId = data.blueAgentId || "ag_019d3f32fc3576c6a94b8b8e033c700f";
         const redId = data.redAgentId || "ag_019d3f38dfd2721cb947ec4597d6eaa8";
 
         isRunning = true;
+        isPaused = false;
         logs = [];
         result = null;
         render();
 
-        const btn = document.getElementById("ao-run-btn");
-        if (btn) { btn.disabled = true; btn.className = "ao-btn running"; btn.textContent = "⟳ Running..."; }
+        // Show pause/stop buttons
+        const pauseBtn = document.getElementById("ao-pause-btn");
+        const stopBtn = document.getElementById("ao-stop-btn");
+        const runBtn = document.getElementById("ao-run-btn");
+        if (pauseBtn) pauseBtn.style.display = "block";
+        if (stopBtn) stopBtn.style.display = "block";
+        if (runBtn) { runBtn.disabled = true; runBtn.className = "ao-btn running"; runBtn.textContent = "⟳ Running..."; }
 
         let memory = {};
         let iterations = 0;
         const startTime = Date.now();
 
         addLog("orchestrator", `Starting task: "${task}"`, "info");
-        addLog("system", `Current page: ${location.href}`, "action");
+        addLog("system", `Mode: ${mode} | Page: ${location.href}`, "action");
 
         try {
-          while (iterations < 15) {
+          while (iterations < 15 && isRunning) {
+            // Pause loop
+            while (isPaused && isRunning) {
+              await new Promise(r => setTimeout(r, 300));
+            }
+            if (!isRunning) break;
+
             iterations++;
             addLog("orchestrator", `── Iteration ${iterations} ──`, "info");
             updateStatus();
 
             const snapshot = getPageSnapshot();
+            addLog("system", `Grid: ${snapshot.grid.length} elements | Survey options: ${snapshot.surveyOptions.length}`, "info");
 
             // Blue Agent
             addLog("orchestrator", "Invoking Blue Agent...", "info");
             let blue;
             try {
-              blue = await runBlueAgent(task, snapshot, memory, apiKey, blueId);
+              blue = await runBlueAgent(task, snapshot, memory, settings, blueId);
               addLog("blue", `Status: ${blue.status || "unknown"} | Confidence: ${blue.confidence || "?"}%`, "info");
               if (blue.reasoning) addLog("blue", blue.reasoning, "info");
             } catch (err) {
@@ -662,7 +1071,7 @@
             addLog("orchestrator", "Invoking Red Agent...", "info");
             let red;
             try {
-              red = await runRedAgent(task, snapshot, memory, blue, apiKey, redId);
+              red = await runRedAgent(task, snapshot, memory, blue, settings, redId);
               if (red.reasoning) addLog("red", red.reasoning, "info");
             } catch (err) {
               addLog("red", `Error: ${err.message}`, "error");
@@ -670,14 +1079,19 @@
             }
 
             if (red.actions?.length) {
-              addLog("red", `Executing ${red.actions.length} action(s)...`, "action");
+              addLog("red", `⚡ Executing ${red.actions.length} action(s) with retry...`, "action");
               for (const action of red.actions) {
-                addLog("red", `→ ${action.type}: ${action.selector || ""}${action.value ? ` = "${action.value}"` : ""}`, "action");
-                try {
-                  await executeBrowserAction(action);
-                  addLog("red", `  ✔ Done`, "success");
-                } catch (err) {
-                  addLog("red", `  ✖ Failed: ${err.message}`, "error");
+                if (!isRunning) break;
+                while (isPaused && isRunning) {
+                  await new Promise(r => setTimeout(r, 300));
+                }
+
+                addLog("red", `→ ${action.type}: ${action.selector || action.value || ""}`, "action");
+                const retryResult = await executeWithRetry(action, 3);
+                if (retryResult.success) {
+                  addLog("red", `  ✔ Done (attempt ${retryResult.attempts})`, "success");
+                } else {
+                  addLog("red", `  ✖ Failed after ${retryResult.attempts} attempts: ${retryResult.error}`, "error");
                 }
                 await new Promise(r => setTimeout(r, 300));
               }
@@ -707,8 +1121,8 @@
           }
 
           if (!result) {
-            result = { success: false, output: "Max iterations reached", iterations };
-            addLog("orchestrator", "Max iterations reached", "warning");
+            result = { success: false, output: isRunning ? "Max iterations reached" : "Stopped by user", iterations };
+            addLog("orchestrator", result.output, "warning");
           }
         } catch (err) {
           addLog("orchestrator", `Fatal: ${err.message}`, "error");
@@ -716,11 +1130,14 @@
         }
 
         isRunning = false;
+        isPaused = false;
         hideCursor();
         updateStatus();
         showResult();
 
-        if (btn) { btn.disabled = false; btn.className = "ao-btn"; btn.textContent = "▶ Execute Task"; }
+        if (runBtn) { runBtn.disabled = false; runBtn.className = "ao-btn"; runBtn.textContent = "▶ Execute Task"; }
+        if (pauseBtn) pauseBtn.style.display = "none";
+        if (stopBtn) stopBtn.style.display = "none";
       }
     );
   }
