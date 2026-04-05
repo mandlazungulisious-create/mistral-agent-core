@@ -1,10 +1,175 @@
 // ──────────────────────────────────────────────
 // Agent Orchestrator — Content Script
 // Injects a free-floating panel into any page
+// with VISUAL ACTION FEEDBACK (cursor, clicks, typing)
 // ──────────────────────────────────────────────
 
 (function () {
   if (document.getElementById("agent-orch-panel")) return;
+
+  // ── Inject Visual Feedback Styles ──
+  const feedbackStyle = document.createElement("style");
+  feedbackStyle.textContent = `
+    @keyframes ao-ripple {
+      0% { transform: translate(-50%,-50%) scale(0); opacity: 1; }
+      100% { transform: translate(-50%,-50%) scale(3); opacity: 0; }
+    }
+    @keyframes ao-pulse-border {
+      0%, 100% { box-shadow: 0 0 0 2px rgba(59,130,246,0.4); }
+      50% { box-shadow: 0 0 0 4px rgba(59,130,246,0.8), 0 0 20px rgba(59,130,246,0.3); }
+    }
+    @keyframes ao-typing-cursor {
+      0%, 100% { border-right-color: #3b82f6; }
+      50% { border-right-color: transparent; }
+    }
+    @keyframes ao-scroll-indicator {
+      0% { transform: translateY(0); opacity: 1; }
+      100% { transform: translateY(20px); opacity: 0; }
+    }
+    #ao-virtual-cursor {
+      position: fixed;
+      width: 20px; height: 20px;
+      pointer-events: none;
+      z-index: 2147483646;
+      transition: left 0.4s cubic-bezier(.4,0,.2,1), top 0.4s cubic-bezier(.4,0,.2,1);
+      filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));
+    }
+    #ao-virtual-cursor svg {
+      width: 20px; height: 20px;
+    }
+    #ao-action-label {
+      position: fixed;
+      pointer-events: none;
+      z-index: 2147483646;
+      background: #0d1117ee;
+      color: #c9d1d9;
+      font-family: 'Consolas', 'JetBrains Mono', monospace;
+      font-size: 11px;
+      padding: 4px 10px;
+      border-radius: 4px;
+      border: 1px solid #30363d;
+      white-space: nowrap;
+      transition: left 0.4s cubic-bezier(.4,0,.2,1), top 0.4s cubic-bezier(.4,0,.2,1);
+    }
+    .ao-highlight-element {
+      outline: 2px solid #3b82f6 !important;
+      outline-offset: 2px !important;
+      animation: ao-pulse-border 1s ease-in-out infinite !important;
+      transition: outline 0.2s !important;
+    }
+    .ao-click-ripple {
+      position: fixed;
+      width: 20px; height: 20px;
+      border-radius: 50%;
+      background: rgba(59,130,246,0.4);
+      pointer-events: none;
+      z-index: 2147483646;
+      animation: ao-ripple 0.6s ease-out forwards;
+    }
+    .ao-typing-indicator {
+      position: fixed;
+      pointer-events: none;
+      z-index: 2147483646;
+      background: #161b22ee;
+      border: 1px solid #3b82f6;
+      border-radius: 6px;
+      padding: 4px 8px;
+      font-family: 'Consolas', monospace;
+      font-size: 12px;
+      color: #3b82f6;
+      white-space: nowrap;
+    }
+    .ao-scroll-arrow {
+      position: fixed;
+      left: 50%;
+      top: 50%;
+      transform: translateX(-50%);
+      pointer-events: none;
+      z-index: 2147483646;
+      font-size: 28px;
+      color: #3b82f6;
+      animation: ao-scroll-indicator 1s ease-out forwards;
+    }
+  `;
+  document.head.appendChild(feedbackStyle);
+
+  // ── Virtual Cursor ──
+  const cursor = document.createElement("div");
+  cursor.id = "ao-virtual-cursor";
+  cursor.innerHTML = `<svg viewBox="0 0 24 24" fill="none"><path d="M4 2 L4 20 L9 15 L14 22 L17 20 L12 13 L19 13 Z" fill="#3b82f6" stroke="#fff" stroke-width="1.5"/></svg>`;
+  cursor.style.display = "none";
+  document.body.appendChild(cursor);
+
+  const actionLabel = document.createElement("div");
+  actionLabel.id = "ao-action-label";
+  actionLabel.style.display = "none";
+  document.body.appendChild(actionLabel);
+
+  function showCursor() { cursor.style.display = "block"; }
+  function hideCursor() { cursor.style.display = "none"; actionLabel.style.display = "none"; }
+
+  function moveCursorTo(x, y, label) {
+    showCursor();
+    cursor.style.left = x + "px";
+    cursor.style.top = y + "px";
+    if (label) {
+      actionLabel.textContent = label;
+      actionLabel.style.display = "block";
+      actionLabel.style.left = (x + 24) + "px";
+      actionLabel.style.top = (y + 4) + "px";
+    }
+  }
+
+  function moveCursorToElement(el, label) {
+    const rect = el.getBoundingClientRect();
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
+    moveCursorTo(x, y, label);
+    return { x, y };
+  }
+
+  function showClickRipple(x, y) {
+    const ripple = document.createElement("div");
+    ripple.className = "ao-click-ripple";
+    ripple.style.left = x + "px";
+    ripple.style.top = y + "px";
+    document.body.appendChild(ripple);
+    setTimeout(() => ripple.remove(), 600);
+  }
+
+  function highlightElement(el) {
+    el.classList.add("ao-highlight-element");
+    return () => el.classList.remove("ao-highlight-element");
+  }
+
+  function showScrollArrow(direction) {
+    const arrow = document.createElement("div");
+    arrow.className = "ao-scroll-arrow";
+    arrow.textContent = direction > 0 ? "⬇" : "⬆";
+    document.body.appendChild(arrow);
+    setTimeout(() => arrow.remove(), 1000);
+  }
+
+  async function simulateTyping(el, text) {
+    const rect = el.getBoundingClientRect();
+    const indicator = document.createElement("div");
+    indicator.className = "ao-typing-indicator";
+    indicator.style.left = rect.left + "px";
+    indicator.style.top = (rect.bottom + 6) + "px";
+    document.body.appendChild(indicator);
+
+    el.focus();
+    el.value = "";
+    for (let i = 0; i < text.length; i++) {
+      el.value += text[i];
+      indicator.textContent = `typing: "${el.value}█"`;
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      await new Promise(r => setTimeout(r, 40 + Math.random() * 60));
+    }
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+    indicator.textContent = `✔ "${text}"`;
+    setTimeout(() => indicator.remove(), 800);
+  }
 
   // ── DOM Cleaner ──
   function cleanDOM(dom) {
@@ -52,10 +217,7 @@
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        agent_id: agentId,
-        messages,
-      }),
+      body: JSON.stringify({ agent_id: agentId, messages }),
     });
 
     if (!res.ok) {
@@ -64,8 +226,7 @@
     }
 
     const data = await res.json();
-    const text =
-      data.choices?.[0]?.message?.content || "{}";
+    const text = data.choices?.[0]?.message?.content || "{}";
 
     try {
       return JSON.parse(text);
@@ -78,10 +239,7 @@
   async function runBlueAgent(task, snapshot, memory, apiKey, agentId) {
     const dom = cleanDOM(snapshot.domTree);
     const payload = {
-      task,
-      url: snapshot.url,
-      title: snapshot.title,
-      dom,
+      task, url: snapshot.url, title: snapshot.title, dom,
       forms: snapshot.forms,
       interactiveElements: snapshot.interactiveElements.length,
       memory,
@@ -91,10 +249,7 @@
       { role: "user", content: JSON.stringify(payload) },
     ]);
 
-    if (output.confidence && output.confidence < 70) {
-      output.status = "need_red";
-    }
-
+    if (output.confidence && output.confidence < 70) output.status = "need_red";
     return output;
   }
 
@@ -102,9 +257,7 @@
   async function runRedAgent(task, snapshot, memory, blueContext, apiKey, agentId) {
     const dom = cleanDOM(snapshot.domTree);
     const payload = {
-      task,
-      url: snapshot.url,
-      dom,
+      task, url: snapshot.url, dom,
       forms: snapshot.forms,
       interactiveElements: snapshot.interactiveElements,
       memory,
@@ -116,62 +269,79 @@
     ]);
 
     const validTypes = ["click", "fill", "select", "hover", "type", "submit", "upload", "wait", "scroll"];
-    output.actions = (output.actions || []).filter((a) =>
-      validTypes.includes(a.type)
-    );
-
+    output.actions = (output.actions || []).filter((a) => validTypes.includes(a.type));
     return output;
   }
 
-  // ── Execute browser actions ──
-  function executeBrowserAction(action) {
+  // ── Execute browser actions WITH visual feedback ──
+  async function executeBrowserAction(action) {
+    const el = action.selector ? document.querySelector(action.selector) : null;
+    let removeHighlight = null;
+
     switch (action.type) {
       case "click": {
-        const el = document.querySelector(action.selector);
-        if (el) el.click();
-        else throw new Error(`Element not found: ${action.selector}`);
+        if (!el) throw new Error(`Element not found: ${action.selector}`);
+        removeHighlight = highlightElement(el);
+        const pos = moveCursorToElement(el, `click → ${action.selector}`);
+        await new Promise(r => setTimeout(r, 500));
+        showClickRipple(pos.x, pos.y);
+        await new Promise(r => setTimeout(r, 200));
+        el.click();
         break;
       }
       case "fill":
       case "type": {
-        const el = document.querySelector(action.selector);
-        if (el) {
-          el.focus();
-          el.value = action.value || "";
-          el.dispatchEvent(new Event("input", { bubbles: true }));
-          el.dispatchEvent(new Event("change", { bubbles: true }));
-        } else throw new Error(`Element not found: ${action.selector}`);
+        if (!el) throw new Error(`Element not found: ${action.selector}`);
+        removeHighlight = highlightElement(el);
+        moveCursorToElement(el, `type → "${(action.value || "").slice(0, 20)}"`);
+        await new Promise(r => setTimeout(r, 400));
+        await simulateTyping(el, action.value || "");
         break;
       }
       case "select": {
-        const el = document.querySelector(action.selector);
-        if (el) {
-          el.value = action.value || "";
-          el.dispatchEvent(new Event("change", { bubbles: true }));
-        }
+        if (!el) break;
+        removeHighlight = highlightElement(el);
+        moveCursorToElement(el, `select → "${action.value}"`);
+        await new Promise(r => setTimeout(r, 400));
+        el.value = action.value || "";
+        el.dispatchEvent(new Event("change", { bubbles: true }));
         break;
       }
       case "hover": {
-        const el = document.querySelector(action.selector);
-        if (el) el.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+        if (!el) break;
+        removeHighlight = highlightElement(el);
+        moveCursorToElement(el, "hover");
+        await new Promise(r => setTimeout(r, 400));
+        el.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
         break;
       }
       case "submit": {
-        const el = document.querySelector(action.selector);
-        if (el) {
-          if (el.tagName === "FORM") el.submit();
-          else el.click();
-        }
+        if (!el) break;
+        removeHighlight = highlightElement(el);
+        const pos = moveCursorToElement(el, "submit");
+        await new Promise(r => setTimeout(r, 400));
+        showClickRipple(pos.x, pos.y);
+        if (el.tagName === "FORM") el.submit();
+        else el.click();
         break;
       }
       case "scroll":
-        window.scrollBy(0, parseInt(action.value) || 300);
+        showScrollArrow(parseInt(action.value) || 300);
+        moveCursorTo(window.innerWidth / 2, window.innerHeight / 2, `scroll ${parseInt(action.value) > 0 ? "↓" : "↑"} ${Math.abs(parseInt(action.value) || 300)}px`);
+        await new Promise(r => setTimeout(r, 300));
+        window.scrollBy({ top: parseInt(action.value) || 300, behavior: "smooth" });
+        await new Promise(r => setTimeout(r, 600));
         break;
       case "wait":
-        return new Promise((r) => setTimeout(r, parseInt(action.value) || 1000));
+        moveCursorTo(window.innerWidth / 2, window.innerHeight / 2, `waiting ${action.value || 1000}ms...`);
+        await new Promise(r => setTimeout(r, parseInt(action.value) || 1000));
+        break;
       default:
         break;
     }
+
+    // Clean up highlight after a delay
+    if (removeHighlight) setTimeout(removeHighlight, 1200);
     return Promise.resolve();
   }
 
@@ -182,7 +352,7 @@
   let logs = [];
   let isRunning = false;
   let result = null;
-  let currentView = "main"; // main | settings | log
+  let currentView = "main";
 
   function createLog(agent, message, type = "info") {
     return { id: Date.now() + Math.random(), timestamp: Date.now(), agent, message, type };
@@ -202,11 +372,8 @@
   document.body.appendChild(panel);
 
   function render() {
-    if (currentView === "settings") {
-      renderSettings();
-    } else {
-      renderMain();
-    }
+    if (currentView === "settings") renderSettings();
+    else renderMain();
   }
 
   function renderMain() {
@@ -230,8 +397,7 @@
           <div class="ao-status-card">
             <div class="ao-status-label">Status</div>
             <div class="ao-status-value" id="ao-status-val">
-              <span class="ao-status-dot" style="background:#8b949e"></span>
-              Idle
+              <span class="ao-status-dot" style="background:#8b949e"></span> Idle
             </div>
           </div>
           <div class="ao-status-card">
@@ -245,7 +411,7 @@
         </div>
         <div class="ao-input-group">
           <label class="ao-label">Task</label>
-          <input class="ao-input" id="ao-task-input" placeholder="Describe the task..." value="Find a login page and prepare to log in">
+          <input class="ao-input" id="ao-task-input" placeholder="Describe the task..." value="">
         </div>
         <button class="ao-btn" id="ao-run-btn">▶ Execute Task</button>
         <div id="ao-log-area" style="margin-top:12px;"></div>
@@ -253,7 +419,6 @@
       </div>
     `;
 
-    // Bind events
     document.getElementById("ao-close-btn").onclick = () => panel.classList.add("hidden");
     document.getElementById("ao-minimize-btn").onclick = () => panel.classList.add("hidden");
     document.getElementById("ao-settings-btn").onclick = () => { currentView = "settings"; render(); };
@@ -261,7 +426,6 @@
 
     setupDrag();
 
-    // Re-render logs
     const logArea = document.getElementById("ao-log-area");
     if (logs.length === 0) {
       logArea.innerHTML = '<div class="ao-empty">Awaiting task execution...</div>';
@@ -344,7 +508,6 @@
     const logArea = document.getElementById("ao-log-area");
     if (!logArea) return;
 
-    // Remove empty state
     const empty = logArea.querySelector(".ao-empty");
     if (empty) empty.remove();
 
@@ -383,9 +546,7 @@
       statusVal.innerHTML = '<span class="ao-status-dot" style="background:#8b949e"></span> Idle';
     }
 
-    if (iterVal) {
-      iterVal.textContent = result?.iterations?.toString() || "—";
-    }
+    if (iterVal) iterVal.textContent = result?.iterations?.toString() || "—";
   }
 
   function showResult() {
@@ -493,7 +654,7 @@
               if (url) {
                 addLog("system", `Navigating to ${url}`, "action");
                 location.href = url;
-                return; // page will reload
+                return;
               }
             }
 
@@ -518,7 +679,7 @@
                 } catch (err) {
                   addLog("red", `  ✖ Failed: ${err.message}`, "error");
                 }
-                await new Promise((r) => setTimeout(r, 300));
+                await new Promise(r => setTimeout(r, 300));
               }
             }
 
@@ -542,7 +703,7 @@
               break;
             }
 
-            await new Promise((r) => setTimeout(r, 800));
+            await new Promise(r => setTimeout(r, 800));
           }
 
           if (!result) {
@@ -555,6 +716,7 @@
         }
 
         isRunning = false;
+        hideCursor();
         updateStatus();
         showResult();
 
