@@ -804,9 +804,8 @@
 
   function renderSettings() {
     chrome.storage.local.get(
-      ["mistralApiKey", "blueAgentId", "redAgentId", "aiMode", "ollamaModel", "ollamaUrl"],
+      ["mistralApiKey", "blueAgentId", "redAgentId", "openRouterApiKey", "sambaNovaApiKey", "siteUrl", "siteName"],
       (data) => {
-        const mode = data.aiMode || "cloud";
         panel.innerHTML = `
           <div class="ao-header" id="ao-drag-handle">
             <div class="ao-title">
@@ -822,65 +821,67 @@
             </div>
           </div>
           <div class="ao-body">
+            <div class="ao-label" style="margin-bottom:8px; color:#58a6ff;">🔵 Blue Agent (Mistral)</div>
             <div class="ao-settings-group">
-              <div class="ao-settings-title">🧠 AI Mode</div>
-              <select class="ao-input" id="ao-ai-mode">
-                <option value="cloud" ${mode === "cloud" ? "selected" : ""}>☁️ Cloud (Mistral API)</option>
-                <option value="local" ${mode === "local" ? "selected" : ""}>💻 Local (Ollama)</option>
-                <option value="hybrid" ${mode === "hybrid" ? "selected" : ""}>🔀 Hybrid (Cloud → Local fallback)</option>
-              </select>
+              <div class="ao-settings-title">🔑 Mistral API Key</div>
+              <input class="ao-input ao-input-password" id="ao-api-key" type="password"
+                placeholder="Enter your Mistral API key..."
+                value="${data.mistralApiKey || ""}">
             </div>
-            <div id="ao-cloud-settings" style="${mode === "local" ? "display:none" : ""}">
-              <div class="ao-settings-group">
-                <div class="ao-settings-title">🔑 Mistral API Key</div>
-                <input class="ao-input ao-input-password" id="ao-api-key" type="password"
-                  placeholder="Enter your Mistral API key..."
-                  value="${data.mistralApiKey || ""}">
-              </div>
-              <div class="ao-settings-group">
-                <div class="ao-settings-title">🔵 Blue Agent ID</div>
-                <input class="ao-input" id="ao-blue-id"
-                  placeholder="ag_..."
-                  value="${data.blueAgentId || "ag_019d3f32fc3576c6a94b8b8e033c700f"}">
-              </div>
-              <div class="ao-settings-group">
-                <div class="ao-settings-title">🔴 Red Agent ID</div>
-                <input class="ao-input" id="ao-red-id"
-                  placeholder="ag_..."
-                  value="${data.redAgentId || "ag_019d3f38dfd2721cb947ec4597d6eaa8"}">
-              </div>
+            <div class="ao-settings-group">
+              <div class="ao-settings-title">🔵 Blue Agent ID</div>
+              <input class="ao-input" id="ao-blue-id"
+                placeholder="ag_..."
+                value="${data.blueAgentId || "ag_019d3f32fc3576c6a94b8b8e033c700f"}">
             </div>
-            <div id="ao-local-settings" style="${mode === "cloud" ? "display:none" : ""}">
-              <div class="ao-settings-group">
-                <div class="ao-settings-title">🦙 Ollama Model</div>
-                <input class="ao-input" id="ao-ollama-model"
-                  placeholder="mistral, llama3, phi3..."
-                  value="${data.ollamaModel || "mistral"}">
-              </div>
-              <div class="ao-settings-group">
-                <div class="ao-settings-title">🌐 Ollama URL</div>
-                <input class="ao-input" id="ao-ollama-url"
-                  placeholder="http://localhost:11434"
-                  value="${data.ollamaUrl || "http://localhost:11434"}">
-              </div>
+            <div class="ao-settings-group">
+              <div class="ao-settings-title">🔴 Red Agent ID</div>
+              <input class="ao-input" id="ao-red-id"
+                placeholder="ag_..."
+                value="${data.redAgentId || "ag_019d3f38dfd2721cb947ec4597d6eaa8"}">
             </div>
+
+            <div style="margin-top:16px; padding-top:12px; border-top:1px solid #30363d;">
+              <div class="ao-label" style="margin-bottom:8px; color:#f85149;">🔴 Red Agent Cloud Models</div>
+              <div class="ao-settings-group">
+                <div class="ao-settings-title">🟢 OpenRouter API Key (Primary)</div>
+                <input class="ao-input ao-input-password" id="ao-openrouter-key" type="password"
+                  placeholder="Enter OpenRouter API key..."
+                  value="${data.openRouterApiKey || ""}">
+              </div>
+              <div class="ao-settings-group">
+                <div class="ao-settings-title">🟡 SambaNova API Key (Fallback)</div>
+                <input class="ao-input ao-input-password" id="ao-sambanova-key" type="password"
+                  placeholder="Enter SambaNova API key..."
+                  value="${data.sambaNovaApiKey || ""}">
+              </div>
+              <div class="ao-settings-group">
+                <div class="ao-settings-title">🌐 Site URL (for OpenRouter)</div>
+                <input class="ao-input" id="ao-site-url"
+                  placeholder="https://yoursite.com"
+                  value="${data.siteUrl || ""}">
+              </div>
+              <div class="ao-settings-group">
+                <div class="ao-settings-title">📛 Site Name (for OpenRouter)</div>
+                <input class="ao-input" id="ao-site-name"
+                  placeholder="My App"
+                  value="${data.siteName || "Agent Orchestrator"}">
+              </div>
+              <p style="font-size:11px; color:#8b949e; line-height:1.5; margin-top:4px;">
+                Red Agent uses: OpenRouter (primary) → SambaNova (fallback) → Mistral Agent (final fallback)
+              </p>
+            </div>
+
             <button class="ao-btn" id="ao-save-btn">💾 Save Settings</button>
             <div class="ao-save-msg" id="ao-save-msg">Settings saved!</div>
             <div style="margin-top:16px; padding-top:12px; border-top:1px solid #30363d;">
               <div class="ao-label" style="margin-bottom:8px;">Security Note</div>
               <p style="font-size:11px; color:#8b949e; line-height:1.5;">
-                Your API key is stored locally in Chrome's secure storage and never sent to any server except Mistral's API.
+                Your API keys are stored locally in Chrome's secure storage and never sent to any server except their respective APIs.
               </p>
             </div>
           </div>
         `;
-
-        // Mode toggle visibility
-        document.getElementById("ao-ai-mode").onchange = (e) => {
-          const val = e.target.value;
-          document.getElementById("ao-cloud-settings").style.display = val === "local" ? "none" : "";
-          document.getElementById("ao-local-settings").style.display = val === "cloud" ? "none" : "";
-        };
 
         document.getElementById("ao-back-btn").onclick = () => { currentView = "main"; render(); };
         document.getElementById("ao-close-btn2").onclick = () => panel.classList.add("hidden");
@@ -889,9 +890,10 @@
             mistralApiKey: document.getElementById("ao-api-key")?.value?.trim() || "",
             blueAgentId: document.getElementById("ao-blue-id")?.value?.trim() || "",
             redAgentId: document.getElementById("ao-red-id")?.value?.trim() || "",
-            aiMode: document.getElementById("ao-ai-mode").value,
-            ollamaModel: document.getElementById("ao-ollama-model")?.value?.trim() || "mistral",
-            ollamaUrl: document.getElementById("ao-ollama-url")?.value?.trim() || "http://localhost:11434",
+            openRouterApiKey: document.getElementById("ao-openrouter-key")?.value?.trim() || "",
+            sambaNovaApiKey: document.getElementById("ao-sambanova-key")?.value?.trim() || "",
+            siteUrl: document.getElementById("ao-site-url")?.value?.trim() || "",
+            siteName: document.getElementById("ao-site-name")?.value?.trim() || "Agent Orchestrator",
           }, () => {
             const msg = document.getElementById("ao-save-msg");
             msg.classList.add("show");
