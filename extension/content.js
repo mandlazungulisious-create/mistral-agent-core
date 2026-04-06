@@ -551,7 +551,7 @@
 
     const output = await callAI(settings, agentId, [
       { role: "user", content: JSON.stringify(payload) },
-    ]);
+    ], "blue");
 
     if (output.confidence && output.confidence < 70) output.status = "need_red";
     return output;
@@ -572,7 +572,7 @@
 
     const output = await callAI(settings, agentId, [
       { role: "user", content: JSON.stringify(payload) },
-    ]);
+    ], "red");
 
     const validTypes = ["click", "fill", "select", "hover", "type", "submit", "upload", "wait", "scroll", "next"];
     output.actions = (output.actions || []).filter((a) => isValidAction(a) && validTypes.includes(a.type));
