@@ -419,7 +419,7 @@
   }
 
   // ══════════════════════════════════════════════
-  // ── AI ROUTER (Cloud Mistral / Local Ollama) ──
+  // ── AI ROUTER (Cloud: Mistral / OpenRouter / SambaNova) ──
   // ══════════════════════════════════════════════
 
   async function callMistralAgent(agentId, apiKey, messages) {
@@ -447,20 +447,28 @@
     }
   }
 
-  async function callLocalOllama(model, messages) {
-    const res = await fetch("http://localhost:11434/api/chat", {
+  async function callOpenRouter(apiKey, messages, siteUrl, siteName) {
+    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model, messages, stream: false }),
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": siteUrl || "",
+        "X-OpenRouter-Title": siteName || "Agent Orchestrator",
+      },
+      body: JSON.stringify({
+        model: "nvidia/llama-nemotron-embed-vl-1b-v2:free",
+        messages,
+      }),
     });
 
     if (!res.ok) {
       const errText = await res.text();
-      throw new Error(`Ollama ${res.status}: ${errText}`);
+      throw new Error(`OpenRouter ${res.status}: ${errText}`);
     }
 
     const data = await res.json();
-    const text = data.message?.content || "{}";
+    const text = data.choices?.[0]?.message?.content || "{}";
 
     try {
       return JSON.parse(text);
@@ -469,26 +477,63 @@
     }
   }
 
-  async function callAI(settings, agentId, messages) {
-    const mode = settings.aiMode || "cloud";
+  async function callSambaNova(apiKey, messages) {
+    const res = await fetch("https://api.sambanova.ai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "E5-Mistral-7B-Instruct",
+        messages,
+        temperature: 0.1,
+        top_p: 0.1,
+      }),
+    });
 
-    if (mode === "local") {
-      const model = settings.ollamaModel || "mistral";
-      return await callLocalOllama(model, messages);
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`SambaNova ${res.status}: ${errText}`);
     }
 
-    if (mode === "hybrid") {
-      // Try cloud first, fallback to local
-      try {
-        return await callMistralAgent(agentId, settings.mistralApiKey, messages);
-      } catch (cloudErr) {
-        addLog("system", `Cloud failed (${cloudErr.message}), falling back to local...`, "warning");
-        const model = settings.ollamaModel || "mistral";
-        return await callLocalOllama(model, messages);
+    const data = await res.json();
+    const text = data.choices?.[0]?.message?.content || "{}";
+
+    try {
+      return JSON.parse(text);
+    } catch {
+      return { raw: text, status: "need_red", reasoning: text, confidence: 50, actions: [] };
+    }
+  }
+
+  async function callAI(settings, agentId, messages, agentRole) {
+    // Blue Agent always uses Mistral Agent API
+    if (agentRole === "blue") {
+      return await callMistralAgent(agentId, settings.mistralApiKey, messages);
+    }
+
+    // Red Agent: OpenRouter primary → SambaNova fallback → Mistral fallback
+    try {
+      if (settings.openRouterApiKey) {
+        addLog("red", "Using OpenRouter (primary)...", "info");
+        return await callOpenRouter(settings.openRouterApiKey, messages, settings.siteUrl, settings.siteName);
       }
+    } catch (err) {
+      addLog("red", `OpenRouter failed: ${err.message}`, "warning");
     }
 
-    // Default: cloud
+    try {
+      if (settings.sambaNovaApiKey) {
+        addLog("red", "Using SambaNova (fallback)...", "info");
+        return await callSambaNova(settings.sambaNovaApiKey, messages);
+      }
+    } catch (err) {
+      addLog("red", `SambaNova failed: ${err.message}`, "warning");
+    }
+
+    // Final fallback: Mistral Agent
+    addLog("red", "Using Mistral Agent (final fallback)...", "info");
     return await callMistralAgent(agentId, settings.mistralApiKey, messages);
   }
 
