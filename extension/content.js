@@ -419,7 +419,7 @@
   }
 
   // ══════════════════════════════════════════════
-  // ── AI ROUTER (Cloud Mistral / Local Ollama) ──
+  // ── AI ROUTER (Cloud: Mistral / OpenRouter / SambaNova) ──
   // ══════════════════════════════════════════════
 
   async function callMistralAgent(agentId, apiKey, messages) {
@@ -447,20 +447,28 @@
     }
   }
 
-  async function callLocalOllama(model, messages) {
-    const res = await fetch("http://localhost:11434/api/chat", {
+  async function callOpenRouter(apiKey, messages, siteUrl, siteName) {
+    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model, messages, stream: false }),
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": siteUrl || "",
+        "X-OpenRouter-Title": siteName || "Agent Orchestrator",
+      },
+      body: JSON.stringify({
+        model: "nvidia/llama-nemotron-embed-vl-1b-v2:free",
+        messages,
+      }),
     });
 
     if (!res.ok) {
       const errText = await res.text();
-      throw new Error(`Ollama ${res.status}: ${errText}`);
+      throw new Error(`OpenRouter ${res.status}: ${errText}`);
     }
 
     const data = await res.json();
-    const text = data.message?.content || "{}";
+    const text = data.choices?.[0]?.message?.content || "{}";
 
     try {
       return JSON.parse(text);
@@ -469,26 +477,63 @@
     }
   }
 
-  async function callAI(settings, agentId, messages) {
-    const mode = settings.aiMode || "cloud";
+  async function callSambaNova(apiKey, messages) {
+    const res = await fetch("https://api.sambanova.ai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "E5-Mistral-7B-Instruct",
+        messages,
+        temperature: 0.1,
+        top_p: 0.1,
+      }),
+    });
 
-    if (mode === "local") {
-      const model = settings.ollamaModel || "mistral";
-      return await callLocalOllama(model, messages);
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`SambaNova ${res.status}: ${errText}`);
     }
 
-    if (mode === "hybrid") {
-      // Try cloud first, fallback to local
-      try {
-        return await callMistralAgent(agentId, settings.mistralApiKey, messages);
-      } catch (cloudErr) {
-        addLog("system", `Cloud failed (${cloudErr.message}), falling back to local...`, "warning");
-        const model = settings.ollamaModel || "mistral";
-        return await callLocalOllama(model, messages);
+    const data = await res.json();
+    const text = data.choices?.[0]?.message?.content || "{}";
+
+    try {
+      return JSON.parse(text);
+    } catch {
+      return { raw: text, status: "need_red", reasoning: text, confidence: 50, actions: [] };
+    }
+  }
+
+  async function callAI(settings, agentId, messages, agentRole) {
+    // Blue Agent always uses Mistral Agent API
+    if (agentRole === "blue") {
+      return await callMistralAgent(agentId, settings.mistralApiKey, messages);
+    }
+
+    // Red Agent: OpenRouter primary → SambaNova fallback → Mistral fallback
+    try {
+      if (settings.openRouterApiKey) {
+        addLog("red", "Using OpenRouter (primary)...", "info");
+        return await callOpenRouter(settings.openRouterApiKey, messages, settings.siteUrl, settings.siteName);
       }
+    } catch (err) {
+      addLog("red", `OpenRouter failed: ${err.message}`, "warning");
     }
 
-    // Default: cloud
+    try {
+      if (settings.sambaNovaApiKey) {
+        addLog("red", "Using SambaNova (fallback)...", "info");
+        return await callSambaNova(settings.sambaNovaApiKey, messages);
+      }
+    } catch (err) {
+      addLog("red", `SambaNova failed: ${err.message}`, "warning");
+    }
+
+    // Final fallback: Mistral Agent
+    addLog("red", "Using Mistral Agent (final fallback)...", "info");
     return await callMistralAgent(agentId, settings.mistralApiKey, messages);
   }
 
@@ -506,7 +551,7 @@
 
     const output = await callAI(settings, agentId, [
       { role: "user", content: JSON.stringify(payload) },
-    ]);
+    ], "blue");
 
     if (output.confidence && output.confidence < 70) output.status = "need_red";
     return output;
@@ -527,7 +572,7 @@
 
     const output = await callAI(settings, agentId, [
       { role: "user", content: JSON.stringify(payload) },
-    ]);
+    ], "red");
 
     const validTypes = ["click", "fill", "select", "hover", "type", "submit", "upload", "wait", "scroll", "next"];
     output.actions = (output.actions || []).filter((a) => isValidAction(a) && validTypes.includes(a.type));
@@ -759,9 +804,8 @@
 
   function renderSettings() {
     chrome.storage.local.get(
-      ["mistralApiKey", "blueAgentId", "redAgentId", "aiMode", "ollamaModel", "ollamaUrl"],
+      ["mistralApiKey", "blueAgentId", "redAgentId", "openRouterApiKey", "sambaNovaApiKey", "siteUrl", "siteName"],
       (data) => {
-        const mode = data.aiMode || "cloud";
         panel.innerHTML = `
           <div class="ao-header" id="ao-drag-handle">
             <div class="ao-title">
@@ -777,65 +821,67 @@
             </div>
           </div>
           <div class="ao-body">
+            <div class="ao-label" style="margin-bottom:8px; color:#58a6ff;">🔵 Blue Agent (Mistral)</div>
             <div class="ao-settings-group">
-              <div class="ao-settings-title">🧠 AI Mode</div>
-              <select class="ao-input" id="ao-ai-mode">
-                <option value="cloud" ${mode === "cloud" ? "selected" : ""}>☁️ Cloud (Mistral API)</option>
-                <option value="local" ${mode === "local" ? "selected" : ""}>💻 Local (Ollama)</option>
-                <option value="hybrid" ${mode === "hybrid" ? "selected" : ""}>🔀 Hybrid (Cloud → Local fallback)</option>
-              </select>
+              <div class="ao-settings-title">🔑 Mistral API Key</div>
+              <input class="ao-input ao-input-password" id="ao-api-key" type="password"
+                placeholder="Enter your Mistral API key..."
+                value="${data.mistralApiKey || ""}">
             </div>
-            <div id="ao-cloud-settings" style="${mode === "local" ? "display:none" : ""}">
-              <div class="ao-settings-group">
-                <div class="ao-settings-title">🔑 Mistral API Key</div>
-                <input class="ao-input ao-input-password" id="ao-api-key" type="password"
-                  placeholder="Enter your Mistral API key..."
-                  value="${data.mistralApiKey || ""}">
-              </div>
-              <div class="ao-settings-group">
-                <div class="ao-settings-title">🔵 Blue Agent ID</div>
-                <input class="ao-input" id="ao-blue-id"
-                  placeholder="ag_..."
-                  value="${data.blueAgentId || "ag_019d3f32fc3576c6a94b8b8e033c700f"}">
-              </div>
-              <div class="ao-settings-group">
-                <div class="ao-settings-title">🔴 Red Agent ID</div>
-                <input class="ao-input" id="ao-red-id"
-                  placeholder="ag_..."
-                  value="${data.redAgentId || "ag_019d3f38dfd2721cb947ec4597d6eaa8"}">
-              </div>
+            <div class="ao-settings-group">
+              <div class="ao-settings-title">🔵 Blue Agent ID</div>
+              <input class="ao-input" id="ao-blue-id"
+                placeholder="ag_..."
+                value="${data.blueAgentId || "ag_019d3f32fc3576c6a94b8b8e033c700f"}">
             </div>
-            <div id="ao-local-settings" style="${mode === "cloud" ? "display:none" : ""}">
-              <div class="ao-settings-group">
-                <div class="ao-settings-title">🦙 Ollama Model</div>
-                <input class="ao-input" id="ao-ollama-model"
-                  placeholder="mistral, llama3, phi3..."
-                  value="${data.ollamaModel || "mistral"}">
-              </div>
-              <div class="ao-settings-group">
-                <div class="ao-settings-title">🌐 Ollama URL</div>
-                <input class="ao-input" id="ao-ollama-url"
-                  placeholder="http://localhost:11434"
-                  value="${data.ollamaUrl || "http://localhost:11434"}">
-              </div>
+            <div class="ao-settings-group">
+              <div class="ao-settings-title">🔴 Red Agent ID</div>
+              <input class="ao-input" id="ao-red-id"
+                placeholder="ag_..."
+                value="${data.redAgentId || "ag_019d3f38dfd2721cb947ec4597d6eaa8"}">
             </div>
+
+            <div style="margin-top:16px; padding-top:12px; border-top:1px solid #30363d;">
+              <div class="ao-label" style="margin-bottom:8px; color:#f85149;">🔴 Red Agent Cloud Models</div>
+              <div class="ao-settings-group">
+                <div class="ao-settings-title">🟢 OpenRouter API Key (Primary)</div>
+                <input class="ao-input ao-input-password" id="ao-openrouter-key" type="password"
+                  placeholder="Enter OpenRouter API key..."
+                  value="${data.openRouterApiKey || ""}">
+              </div>
+              <div class="ao-settings-group">
+                <div class="ao-settings-title">🟡 SambaNova API Key (Fallback)</div>
+                <input class="ao-input ao-input-password" id="ao-sambanova-key" type="password"
+                  placeholder="Enter SambaNova API key..."
+                  value="${data.sambaNovaApiKey || ""}">
+              </div>
+              <div class="ao-settings-group">
+                <div class="ao-settings-title">🌐 Site URL (for OpenRouter)</div>
+                <input class="ao-input" id="ao-site-url"
+                  placeholder="https://yoursite.com"
+                  value="${data.siteUrl || ""}">
+              </div>
+              <div class="ao-settings-group">
+                <div class="ao-settings-title">📛 Site Name (for OpenRouter)</div>
+                <input class="ao-input" id="ao-site-name"
+                  placeholder="My App"
+                  value="${data.siteName || "Agent Orchestrator"}">
+              </div>
+              <p style="font-size:11px; color:#8b949e; line-height:1.5; margin-top:4px;">
+                Red Agent uses: OpenRouter (primary) → SambaNova (fallback) → Mistral Agent (final fallback)
+              </p>
+            </div>
+
             <button class="ao-btn" id="ao-save-btn">💾 Save Settings</button>
             <div class="ao-save-msg" id="ao-save-msg">Settings saved!</div>
             <div style="margin-top:16px; padding-top:12px; border-top:1px solid #30363d;">
               <div class="ao-label" style="margin-bottom:8px;">Security Note</div>
               <p style="font-size:11px; color:#8b949e; line-height:1.5;">
-                Your API key is stored locally in Chrome's secure storage and never sent to any server except Mistral's API.
+                Your API keys are stored locally in Chrome's secure storage and never sent to any server except their respective APIs.
               </p>
             </div>
           </div>
         `;
-
-        // Mode toggle visibility
-        document.getElementById("ao-ai-mode").onchange = (e) => {
-          const val = e.target.value;
-          document.getElementById("ao-cloud-settings").style.display = val === "local" ? "none" : "";
-          document.getElementById("ao-local-settings").style.display = val === "cloud" ? "none" : "";
-        };
 
         document.getElementById("ao-back-btn").onclick = () => { currentView = "main"; render(); };
         document.getElementById("ao-close-btn2").onclick = () => panel.classList.add("hidden");
@@ -844,9 +890,10 @@
             mistralApiKey: document.getElementById("ao-api-key")?.value?.trim() || "",
             blueAgentId: document.getElementById("ao-blue-id")?.value?.trim() || "",
             redAgentId: document.getElementById("ao-red-id")?.value?.trim() || "",
-            aiMode: document.getElementById("ao-ai-mode").value,
-            ollamaModel: document.getElementById("ao-ollama-model")?.value?.trim() || "mistral",
-            ollamaUrl: document.getElementById("ao-ollama-url")?.value?.trim() || "http://localhost:11434",
+            openRouterApiKey: document.getElementById("ao-openrouter-key")?.value?.trim() || "",
+            sambaNovaApiKey: document.getElementById("ao-sambanova-key")?.value?.trim() || "",
+            siteUrl: document.getElementById("ao-site-url")?.value?.trim() || "",
+            siteName: document.getElementById("ao-site-name")?.value?.trim() || "Agent Orchestrator",
           }, () => {
             const msg = document.getElementById("ao-save-msg");
             msg.classList.add("show");
@@ -985,20 +1032,19 @@
     if (!task || isRunning) return;
 
     chrome.storage.local.get(
-      ["mistralApiKey", "blueAgentId", "redAgentId", "aiMode", "ollamaModel", "ollamaUrl"],
+      ["mistralApiKey", "blueAgentId", "redAgentId", "openRouterApiKey", "sambaNovaApiKey", "siteUrl", "siteName"],
       async (data) => {
-        const mode = data.aiMode || "cloud";
-
-        if (mode !== "local" && !data.mistralApiKey) {
-          addLog("system", "⚠ No API key configured — open Settings", "error");
+        if (!data.mistralApiKey) {
+          addLog("system", "⚠ No Mistral API key configured — open Settings", "error");
           return;
         }
 
         const settings = {
           mistralApiKey: data.mistralApiKey,
-          aiMode: mode,
-          ollamaModel: data.ollamaModel || "mistral",
-          ollamaUrl: data.ollamaUrl || "http://localhost:11434",
+          openRouterApiKey: data.openRouterApiKey || "",
+          sambaNovaApiKey: data.sambaNovaApiKey || "",
+          siteUrl: data.siteUrl || "",
+          siteName: data.siteName || "Agent Orchestrator",
         };
 
         const blueId = data.blueAgentId || "ag_019d3f32fc3576c6a94b8b8e033c700f";

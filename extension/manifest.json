@@ -5,9 +5,9 @@
   "description": "Blue + Red Mistral AI Agent system for web automation with smart survey detection",
   "permissions": ["activeTab", "storage", "tabs", "scripting"],
   "host_permissions": [
-    "http://localhost:11434/*",
-    "http://localhost:5000/*",
-    "https://api.mistral.ai/*"
+    "https://api.mistral.ai/*",
+    "https://openrouter.ai/*",
+    "https://api.sambanova.ai/*"
   ],
   "action": {
     "default_popup": "popup.html",
