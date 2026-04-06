@@ -447,7 +447,7 @@
     }
   }
 
-  async function callOpenRouter(apiKey, messages, siteUrl, siteName) {
+  async function callOpenRouter(apiKey, messages, siteUrl, siteName, model) {
     const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -457,7 +457,7 @@
         "X-OpenRouter-Title": siteName || "Agent Orchestrator",
       },
       body: JSON.stringify({
-        model: "nvidia/llama-nemotron-embed-vl-1b-v2:free",
+        model: model || "nvidia/llama-nemotron-embed-vl-1b-v2:free",
         messages,
       }),
     });
@@ -485,7 +485,7 @@
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "E5-Mistral-7B-Instruct",
+        model: "DeepSeek-V3.2",
         messages,
         temperature: 0.1,
         top_p: 0.1,
@@ -508,32 +508,34 @@
   }
 
   async function callAI(settings, agentId, messages, agentRole) {
-    // Blue Agent always uses Mistral Agent API
-    if (agentRole === "blue") {
-      return await callMistralAgent(agentId, settings.mistralApiKey, messages);
-    }
+    const isBlue = agentRole === "blue";
+    const label = isBlue ? "blue" : "red";
+    const orModel = isBlue
+      ? "qwen/qwen3-next-80b-a3b-instruct:free"
+      : "nvidia/llama-nemotron-embed-vl-1b-v2:free";
 
-    // Red Agent: OpenRouter primary → SambaNova fallback → Mistral fallback
+    // Primary: OpenRouter
     try {
       if (settings.openRouterApiKey) {
-        addLog("red", "Using OpenRouter (primary)...", "info");
-        return await callOpenRouter(settings.openRouterApiKey, messages, settings.siteUrl, settings.siteName);
+        addLog(label, `Using OpenRouter (primary, ${orModel})...`, "info");
+        return await callOpenRouter(settings.openRouterApiKey, messages, settings.siteUrl, settings.siteName, orModel);
       }
     } catch (err) {
-      addLog("red", `OpenRouter failed: ${err.message}`, "warning");
+      addLog(label, `OpenRouter failed: ${err.message}`, "warning");
     }
 
+    // Fallback: SambaNova
     try {
       if (settings.sambaNovaApiKey) {
-        addLog("red", "Using SambaNova (fallback)...", "info");
+        addLog(label, "Using SambaNova (fallback, DeepSeek-V3.2)...", "info");
         return await callSambaNova(settings.sambaNovaApiKey, messages);
       }
     } catch (err) {
-      addLog("red", `SambaNova failed: ${err.message}`, "warning");
+      addLog(label, `SambaNova failed: ${err.message}`, "warning");
     }
 
     // Final fallback: Mistral Agent
-    addLog("red", "Using Mistral Agent (final fallback)...", "info");
+    addLog(label, "Using Mistral Agent (final fallback)...", "info");
     return await callMistralAgent(agentId, settings.mistralApiKey, messages);
   }
 
