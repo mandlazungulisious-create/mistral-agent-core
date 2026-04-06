@@ -1032,20 +1032,19 @@
     if (!task || isRunning) return;
 
     chrome.storage.local.get(
-      ["mistralApiKey", "blueAgentId", "redAgentId", "aiMode", "ollamaModel", "ollamaUrl"],
+      ["mistralApiKey", "blueAgentId", "redAgentId", "openRouterApiKey", "sambaNovaApiKey", "siteUrl", "siteName"],
       async (data) => {
-        const mode = data.aiMode || "cloud";
-
-        if (mode !== "local" && !data.mistralApiKey) {
-          addLog("system", "⚠ No API key configured — open Settings", "error");
+        if (!data.mistralApiKey) {
+          addLog("system", "⚠ No Mistral API key configured — open Settings", "error");
           return;
         }
 
         const settings = {
           mistralApiKey: data.mistralApiKey,
-          aiMode: mode,
-          ollamaModel: data.ollamaModel || "mistral",
-          ollamaUrl: data.ollamaUrl || "http://localhost:11434",
+          openRouterApiKey: data.openRouterApiKey || "",
+          sambaNovaApiKey: data.sambaNovaApiKey || "",
+          siteUrl: data.siteUrl || "",
+          siteName: data.siteName || "Agent Orchestrator",
         };
 
         const blueId = data.blueAgentId || "ag_019d3f32fc3576c6a94b8b8e033c700f";
