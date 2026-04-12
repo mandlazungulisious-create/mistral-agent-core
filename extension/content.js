@@ -507,35 +507,45 @@
     }
   }
 
+  // Free OpenRouter models list
+  const FREE_OPENROUTER_MODELS = [
+    { id: "qwen/qwen3-next-80b-a3b-instruct:free", name: "Qwen3 Next 80B (Free)" },
+    { id: "nvidia/llama-nemotron-embed-vl-1b-v2:free", name: "Nemotron Embed VL 1B (Free)" },
+    { id: "deepseek/deepseek-chat-v3-0324:free", name: "DeepSeek Chat V3 (Free)" },
+    { id: "google/gemma-3-27b-it:free", name: "Gemma 3 27B (Free)" },
+    { id: "meta-llama/llama-4-maverick:free", name: "Llama 4 Maverick (Free)" },
+    { id: "meta-llama/llama-4-scout:free", name: "Llama 4 Scout (Free)" },
+    { id: "microsoft/mai-ds-r1:free", name: "MAI DS R1 (Free)" },
+    { id: "mistralai/devstral-small:free", name: "Devstral Small (Free)" },
+    { id: "mistralai/mistral-small-3.2-24b-instruct:free", name: "Mistral Small 3.2 (Free)" },
+    { id: "qwen/qwen3-235b-a22b:free", name: "Qwen3 235B (Free)" },
+    { id: "qwen/qwen3-30b-a3b:free", name: "Qwen3 30B (Free)" },
+    { id: "rekaai/reka-flash-3:free", name: "Reka Flash 3 (Free)" },
+  ];
+
   async function callAI(settings, agentId, messages, agentRole) {
     const isBlue = agentRole === "blue";
     const label = isBlue ? "blue" : "red";
-    const orModel = isBlue
-      ? "qwen/qwen3-next-80b-a3b-instruct:free"
-      : "nvidia/llama-nemotron-embed-vl-1b-v2:free";
+    const provider = isBlue ? (settings.blueProvider || "mistral") : (settings.redProvider || "mistral");
+    const model = isBlue ? (settings.blueModel || FREE_OPENROUTER_MODELS[0].id) : (settings.redModel || FREE_OPENROUTER_MODELS[0].id);
 
-    // Primary: OpenRouter
-    try {
-      if (settings.openRouterApiKey) {
-        addLog(label, `Using OpenRouter (primary, ${orModel})...`, "info");
-        return await callOpenRouter(settings.openRouterApiKey, messages, settings.siteUrl, settings.siteName, orModel);
+    if (provider === "openrouter") {
+      if (!settings.openRouterApiKey) throw new Error("OpenRouter API key not set");
+      addLog(label, `OpenRouter → ${model}`, "info");
+      try {
+        return await callOpenRouter(settings.openRouterApiKey, messages, settings.siteUrl, settings.siteName, model);
+      } catch (err) {
+        addLog(label, `OpenRouter failed: ${err.message}, falling back to Mistral...`, "warning");
+        if (settings.mistralApiKey) {
+          return await callMistralAgent(agentId, settings.mistralApiKey, messages);
+        }
+        throw err;
       }
-    } catch (err) {
-      addLog(label, `OpenRouter failed: ${err.message}`, "warning");
     }
 
-    // Fallback: SambaNova
-    try {
-      if (settings.sambaNovaApiKey) {
-        addLog(label, "Using SambaNova (fallback, DeepSeek-V3.2)...", "info");
-        return await callSambaNova(settings.sambaNovaApiKey, messages);
-      }
-    } catch (err) {
-      addLog(label, `SambaNova failed: ${err.message}`, "warning");
-    }
-
-    // Final fallback: Mistral Agent
-    addLog(label, "Using Mistral Agent (final fallback)...", "info");
+    // Mistral Cloud
+    if (!settings.mistralApiKey) throw new Error("Mistral API key not set");
+    addLog(label, "Using Mistral Cloud Agent...", "info");
     return await callMistralAgent(agentId, settings.mistralApiKey, messages);
   }
 
