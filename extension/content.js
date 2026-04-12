@@ -477,35 +477,7 @@
     }
   }
 
-  async function callSambaNova(apiKey, messages) {
-    const res = await fetch("https://api.sambanova.ai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "DeepSeek-V3.2",
-        messages,
-        temperature: 0.1,
-        top_p: 0.1,
-      }),
-    });
-
-    if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(`SambaNova ${res.status}: ${errText}`);
-    }
-
-    const data = await res.json();
-    const text = data.choices?.[0]?.message?.content || "{}";
-
-    try {
-      return JSON.parse(text);
-    } catch {
-      return { raw: text, status: "need_red", reasoning: text, confidence: 50, actions: [] };
-    }
-  }
+  // SambaNova removed — replaced by provider selection
 
   // Free OpenRouter models list
   const FREE_OPENROUTER_MODELS = [
@@ -816,8 +788,19 @@
 
   function renderSettings() {
     chrome.storage.local.get(
-      ["mistralApiKey", "blueAgentId", "redAgentId", "openRouterApiKey", "sambaNovaApiKey", "siteUrl", "siteName"],
+      ["mistralApiKey", "blueAgentId", "redAgentId", "openRouterApiKey", "siteUrl", "siteName", "blueProvider", "redProvider", "blueModel", "redModel"],
       (data) => {
+        const blueProvider = data.blueProvider || "mistral";
+        const redProvider = data.redProvider || "mistral";
+        const blueModel = data.blueModel || FREE_OPENROUTER_MODELS[0].id;
+        const redModel = data.redModel || FREE_OPENROUTER_MODELS[0].id;
+
+        function modelOptions(selected) {
+          return FREE_OPENROUTER_MODELS.map(m =>
+            `<option value="${m.id}" ${m.id === selected ? "selected" : ""}>${m.name}</option>`
+          ).join("");
+        }
+
         panel.innerHTML = `
           <div class="ao-header" id="ao-drag-handle">
             <div class="ao-title">
@@ -833,55 +816,80 @@
             </div>
           </div>
           <div class="ao-body">
-            <div class="ao-label" style="margin-bottom:8px; color:#58a6ff;">🔵 Blue Agent (Mistral)</div>
+
+            <!-- API Keys Section -->
+            <div class="ao-label" style="margin-bottom:8px; color:#58a6ff;">🔑 API Keys</div>
             <div class="ao-settings-group">
-              <div class="ao-settings-title">🔑 Mistral API Key</div>
+              <div class="ao-settings-title">Mistral API Key</div>
               <input class="ao-input ao-input-password" id="ao-api-key" type="password"
-                placeholder="Enter your Mistral API key..."
-                value="${data.mistralApiKey || ""}">
+                placeholder="sk-..." value="${data.mistralApiKey || ""}">
             </div>
             <div class="ao-settings-group">
-              <div class="ao-settings-title">🔵 Blue Agent ID</div>
-              <input class="ao-input" id="ao-blue-id"
-                placeholder="ag_..."
-                value="${data.blueAgentId || "ag_019d3f32fc3576c6a94b8b8e033c700f"}">
-            </div>
-            <div class="ao-settings-group">
-              <div class="ao-settings-title">🔴 Red Agent ID</div>
-              <input class="ao-input" id="ao-red-id"
-                placeholder="ag_..."
-                value="${data.redAgentId || "ag_019d3f38dfd2721cb947ec4597d6eaa8"}">
+              <div class="ao-settings-title">OpenRouter API Key</div>
+              <input class="ao-input ao-input-password" id="ao-openrouter-key" type="password"
+                placeholder="sk-or-..." value="${data.openRouterApiKey || ""}">
             </div>
 
+            <!-- Agent IDs -->
             <div style="margin-top:16px; padding-top:12px; border-top:1px solid #30363d;">
-              <div class="ao-label" style="margin-bottom:8px; color:#f85149;">🔴 Red Agent Cloud Models</div>
+              <div class="ao-label" style="margin-bottom:8px; color:#8b949e;">Mistral Agent IDs</div>
               <div class="ao-settings-group">
-                <div class="ao-settings-title">🟢 OpenRouter API Key (Primary)</div>
-                <input class="ao-input ao-input-password" id="ao-openrouter-key" type="password"
-                  placeholder="Enter OpenRouter API key..."
-                  value="${data.openRouterApiKey || ""}">
+                <div class="ao-settings-title">🔵 Blue Agent ID</div>
+                <input class="ao-input" id="ao-blue-id" placeholder="ag_..."
+                  value="${data.blueAgentId || "ag_019d3f32fc3576c6a94b8b8e033c700f"}">
               </div>
               <div class="ao-settings-group">
-                <div class="ao-settings-title">🟡 SambaNova API Key (Fallback)</div>
-                <input class="ao-input ao-input-password" id="ao-sambanova-key" type="password"
-                  placeholder="Enter SambaNova API key..."
-                  value="${data.sambaNovaApiKey || ""}">
+                <div class="ao-settings-title">🔴 Red Agent ID</div>
+                <input class="ao-input" id="ao-red-id" placeholder="ag_..."
+                  value="${data.redAgentId || "ag_019d3f38dfd2721cb947ec4597d6eaa8"}">
               </div>
+            </div>
+
+            <!-- Blue Agent Provider -->
+            <div style="margin-top:16px; padding-top:12px; border-top:1px solid #30363d;">
+              <div class="ao-label" style="margin-bottom:8px; color:#58a6ff;">🔵 Blue Agent — Provider</div>
               <div class="ao-settings-group">
-                <div class="ao-settings-title">🌐 Site URL (for OpenRouter)</div>
-                <input class="ao-input" id="ao-site-url"
-                  placeholder="https://yoursite.com"
+                <div class="ao-settings-title">Provider</div>
+                <select class="ao-input" id="ao-blue-provider">
+                  <option value="mistral" ${blueProvider === "mistral" ? "selected" : ""}>Mistral Cloud</option>
+                  <option value="openrouter" ${blueProvider === "openrouter" ? "selected" : ""}>OpenRouter (Free)</option>
+                </select>
+              </div>
+              <div class="ao-settings-group" id="ao-blue-model-group" style="display:${blueProvider === "openrouter" ? "block" : "none"}">
+                <div class="ao-settings-title">Model</div>
+                <select class="ao-input" id="ao-blue-model">${modelOptions(blueModel)}</select>
+              </div>
+            </div>
+
+            <!-- Red Agent Provider -->
+            <div style="margin-top:16px; padding-top:12px; border-top:1px solid #30363d;">
+              <div class="ao-label" style="margin-bottom:8px; color:#f85149;">🔴 Red Agent — Provider</div>
+              <div class="ao-settings-group">
+                <div class="ao-settings-title">Provider</div>
+                <select class="ao-input" id="ao-red-provider">
+                  <option value="mistral" ${redProvider === "mistral" ? "selected" : ""}>Mistral Cloud</option>
+                  <option value="openrouter" ${redProvider === "openrouter" ? "selected" : ""}>OpenRouter (Free)</option>
+                </select>
+              </div>
+              <div class="ao-settings-group" id="ao-red-model-group" style="display:${redProvider === "openrouter" ? "block" : "none"}">
+                <div class="ao-settings-title">Model</div>
+                <select class="ao-input" id="ao-red-model">${modelOptions(redModel)}</select>
+              </div>
+            </div>
+
+            <!-- OpenRouter extras -->
+            <div style="margin-top:16px; padding-top:12px; border-top:1px solid #30363d;">
+              <div class="ao-label" style="margin-bottom:8px; color:#8b949e;">OpenRouter Settings</div>
+              <div class="ao-settings-group">
+                <div class="ao-settings-title">🌐 Site URL</div>
+                <input class="ao-input" id="ao-site-url" placeholder="https://yoursite.com"
                   value="${data.siteUrl || ""}">
               </div>
               <div class="ao-settings-group">
-                <div class="ao-settings-title">📛 Site Name (for OpenRouter)</div>
-                <input class="ao-input" id="ao-site-name"
-                  placeholder="My App"
+                <div class="ao-settings-title">📛 Site Name</div>
+                <input class="ao-input" id="ao-site-name" placeholder="My App"
                   value="${data.siteName || "Agent Orchestrator"}">
               </div>
-              <p style="font-size:11px; color:#8b949e; line-height:1.5; margin-top:4px;">
-                Red Agent uses: OpenRouter (primary) → SambaNova (fallback) → Mistral Agent (final fallback)
-              </p>
             </div>
 
             <button class="ao-btn" id="ao-save-btn">💾 Save Settings</button>
@@ -895,6 +903,14 @@
           </div>
         `;
 
+        // Toggle model dropdown visibility
+        document.getElementById("ao-blue-provider").onchange = (e) => {
+          document.getElementById("ao-blue-model-group").style.display = e.target.value === "openrouter" ? "block" : "none";
+        };
+        document.getElementById("ao-red-provider").onchange = (e) => {
+          document.getElementById("ao-red-model-group").style.display = e.target.value === "openrouter" ? "block" : "none";
+        };
+
         document.getElementById("ao-back-btn").onclick = () => { currentView = "main"; render(); };
         document.getElementById("ao-close-btn2").onclick = () => panel.classList.add("hidden");
         document.getElementById("ao-save-btn").onclick = () => {
@@ -903,9 +919,12 @@
             blueAgentId: document.getElementById("ao-blue-id")?.value?.trim() || "",
             redAgentId: document.getElementById("ao-red-id")?.value?.trim() || "",
             openRouterApiKey: document.getElementById("ao-openrouter-key")?.value?.trim() || "",
-            sambaNovaApiKey: document.getElementById("ao-sambanova-key")?.value?.trim() || "",
             siteUrl: document.getElementById("ao-site-url")?.value?.trim() || "",
             siteName: document.getElementById("ao-site-name")?.value?.trim() || "Agent Orchestrator",
+            blueProvider: document.getElementById("ao-blue-provider")?.value || "mistral",
+            redProvider: document.getElementById("ao-red-provider")?.value || "mistral",
+            blueModel: document.getElementById("ao-blue-model")?.value || FREE_OPENROUTER_MODELS[0].id,
+            redModel: document.getElementById("ao-red-model")?.value || FREE_OPENROUTER_MODELS[0].id,
           }, () => {
             const msg = document.getElementById("ao-save-msg");
             msg.classList.add("show");
