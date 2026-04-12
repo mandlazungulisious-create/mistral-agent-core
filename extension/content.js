@@ -967,9 +967,10 @@
   function updateModeDisplay() {
     const modeVal = document.getElementById("ao-mode-val");
     if (!modeVal) return;
-    chrome.storage.local.get(["aiMode"], (data) => {
-      const labels = { cloud: "☁ Cloud", local: "💻 Local", hybrid: "🔀 Hybrid" };
-      modeVal.textContent = labels[data.aiMode] || "☁ Cloud";
+    chrome.storage.local.get(["blueProvider", "redProvider"], (data) => {
+      const bp = data.blueProvider || "mistral";
+      const rp = data.redProvider || "mistral";
+      modeVal.textContent = `🔵${bp === "openrouter" ? "OR" : "M"} 🔴${rp === "openrouter" ? "OR" : "M"}`;
     });
   }
 
@@ -1063,19 +1064,29 @@
     if (!task || isRunning) return;
 
     chrome.storage.local.get(
-      ["mistralApiKey", "blueAgentId", "redAgentId", "openRouterApiKey", "sambaNovaApiKey", "siteUrl", "siteName"],
+      ["mistralApiKey", "blueAgentId", "redAgentId", "openRouterApiKey", "siteUrl", "siteName", "blueProvider", "redProvider", "blueModel", "redModel"],
       async (data) => {
-        if (!data.mistralApiKey) {
-          addLog("system", "⚠ No Mistral API key configured — open Settings", "error");
-          return;
+        const blueP = data.blueProvider || "mistral";
+        const redP = data.redProvider || "mistral";
+        if (blueP === "mistral" && !data.mistralApiKey) {
+          addLog("system", "⚠ Blue Agent needs Mistral API key — open Settings", "error"); return;
+        }
+        if (redP === "mistral" && !data.mistralApiKey) {
+          addLog("system", "⚠ Red Agent needs Mistral API key — open Settings", "error"); return;
+        }
+        if ((blueP === "openrouter" || redP === "openrouter") && !data.openRouterApiKey) {
+          addLog("system", "⚠ OpenRouter API key required — open Settings", "error"); return;
         }
 
         const settings = {
-          mistralApiKey: data.mistralApiKey,
+          mistralApiKey: data.mistralApiKey || "",
           openRouterApiKey: data.openRouterApiKey || "",
-          sambaNovaApiKey: data.sambaNovaApiKey || "",
           siteUrl: data.siteUrl || "",
           siteName: data.siteName || "Agent Orchestrator",
+          blueProvider: blueP,
+          redProvider: redP,
+          blueModel: data.blueModel || FREE_OPENROUTER_MODELS[0].id,
+          redModel: data.redModel || FREE_OPENROUTER_MODELS[0].id,
         };
 
         const blueId = data.blueAgentId || "ag_019d3f32fc3576c6a94b8b8e033c700f";
