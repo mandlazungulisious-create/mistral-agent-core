@@ -3,8 +3,8 @@ const settingsBtn = document.getElementById("settingsBtn");
 const statusEl = document.getElementById("status");
 
 // Check if API key is set
-chrome.storage.local.get(["mistralApiKey"], (data) => {
-  if (data.mistralApiKey) {
+chrome.storage.local.get(["mistralApiKey", "openRouterApiKey"], (data) => {
+  if (data.mistralApiKey || data.openRouterApiKey) {
     statusEl.textContent = "✔ API key configured";
     statusEl.className = "status connected";
   } else {
